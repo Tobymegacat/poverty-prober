@@ -5,7 +5,7 @@ from PySide6.QtCore import QTimer
 from poverty_prober.camera_stuff import camera_handler
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtCore import QRectF, QPointF
-# {'X': 55.46, 'Y': 113.08, 'Z': 9.35}
+ # {'X': 55.46, 'Y': 113.08, 'Z': 9.35}
 # {'X': 120.48, 'Y': 112.78, 'Z': 8.95}
 
 def main_loop():

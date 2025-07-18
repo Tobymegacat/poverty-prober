@@ -410,6 +410,8 @@ class camera_handler():
             msg.exec()
 
     def plot_die(self, die_size_mm, points_to_probe, die_center):
+
+        sigma = False
         if not self.instrument_connected:
             msg = QMessageBox()
             msg.setWindowTitle("Error")

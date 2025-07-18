@@ -847,3 +847,5 @@ class MainWindow(QMainWindow):
         self._probe_confirm_btn = confirm_btn
 
         dialog.show()
+
+    # def probe_all
