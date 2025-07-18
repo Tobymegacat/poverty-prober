@@ -1,0 +1,849 @@
+from PySide6.QtWidgets import QDialog, QGraphicsTextItem, QPushButton, QVBoxLayout,QLabel,QLineEdit, QInputDialog, QListWidgetItem, QFileDialog, QToolTip, QMainWindow, QMessageBox, QGraphicsView, QGraphicsScene, QGraphicsRectItem 
+from .probeGUI import Ui_MainWindow
+from .probing_stuff import probe_handler
+from .camera_stuff import camera_handler
+from PySide6.QtGui import QBrush, QColor, QCursor
+from PySide6.QtCore import QRectF, Qt
+import numpy as np
+import gdspy
+import math
+import keyboard
+
+from pathlib import Path
+
+import serial
+import serial.tools.list_ports
+import time
+import pygame
+
+import json
+
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+
+
+
+
+colornames =  [
+            "green", "yellow", "cyan", "magenta", "gray", "lightgray", "darkgray",
+            "orange", "pink", "purple", "brown", "navy", "teal",
+            "lime", "olive", "maroon", "gold", "indigo", "turquoise",
+            "skyblue", "deepskyblue", "lightblue", "dodgerblue",
+            "orchid", "plum", "salmon", "coral", "tomato", "crimson"
+        ]   
+
+highest_id = 0
+
+class ChipViewer(QDialog):
+    def __init__(self, gds_path, chipname, rowcol, resistance_map=None, ):
+        super().__init__()
+        self.setWindowTitle(f"Chip Resistance Viewer: {chipname}, row: {rowcol[0,0]} col: {rowcol[1,0]}")
+        layout = QVBoxLayout(self)
+
+        # Setup scene and view
+        self.scene = QGraphicsScene()
+        self.view = QGraphicsView(self.scene)
+        layout.addWidget(self.view)
+
+        # Load GDS and draw
+        self.load_gds(gds_path, resistance_map)
+
+        self.resize(800, 600)
+        self.show()
+
+    def load_gds(self, gds_path, resistance_map=None, target_layer=50):
+        lib = gdspy.GdsLibrary(infile=gds_path)
+        cell = lib.top_level()[0]
+
+        # Group polygons by (layer, datatype)
+        poly_dict = cell.get_polygons(by_spec=True)
+
+        for (layer, datatype), polygons in poly_dict.items():
+            if layer != target_layer:
+                continue  # skip other layers
+
+            for points in polygons:
+                if len(points) != 4:
+                    continue  # skip non-rectangles
+
+                # Bounding box
+                x_coords = points[:, 0]
+                y_coords = points[:, 1]
+
+                centroid = np.mean(points, axis=0)/1000
+
+                x = min(x_coords)
+                y = min(y_coords)
+                w = max(x_coords) - x
+                h = max(y_coords) - y
+                self.scene.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
+                rect_item = QGraphicsRectItem(QRectF(x/7, (-y - h)/7, w/7, h/7))
+                rect_item.setBrush(QBrush(QColor(180, 240, 200)))
+                self.scene.addItem(rect_item)
+
+                if resistance_map is not None and resistance_map.size > 0:
+                    # Debug: Print what we're looking for
+                    
+                    # Use tolerance-based matching instead of exact equality
+                    tolerance = 1e-6  # Adjust this value as needed
+                    
+                    # Calculate distances to all points in resistance_map
+                    distances = np.sqrt((resistance_map[0] - centroid[0])**2 + 
+                                      (resistance_map[1] - centroid[1])**2)
+                    
+                    # Find the closest match
+                    min_distance_idx = np.argmin(distances)
+                    min_distance = distances[min_distance_idx]
+                    
+                    
+                    if min_distance < tolerance:
+                        resistance = resistance_map[2, min_distance_idx]
+                        
+                        # Format resistance value
+                        if resistance < 1000:
+                            resistance_display = resistance
+                            resistance_rounded = math.trunc(resistance_display * 100) / 100
+                            text_item = QGraphicsTextItem(f"{resistance_rounded}Ω")
+                        elif resistance < 1000000:
+                            resistance_display = resistance / 1000
+                            resistance_rounded = math.trunc(resistance_display * 100) / 100
+                            text_item = QGraphicsTextItem(f"{resistance_rounded}kΩ")
+                        else:
+                            resistance_display = resistance / 1000000
+                            resistance_rounded = math.trunc(resistance_display * 100) / 100
+                            text_item = QGraphicsTextItem(f"{resistance_rounded}MΩ")  # Fixed: should be MΩ, not kΩ
+                        
+                        text_item.setDefaultTextColor(QColor("black"))
+                        text_item.setPos((x + w / 2)/7 - 18, (-y - h / 2)/7)
+                        self.scene.addItem(text_item)
+                    else:
+                        # Optionally add a "No data" label
+                        text_item = QGraphicsTextItem("No data")
+                        text_item.setDefaultTextColor(QColor("red"))
+                        text_item.setPos((x + w / 2 - 15)/7, (-y - h / 2)/7)
+                        self.scene.addItem(text_item)
+
+class wafer_chip_type(QListWidgetItem):
+    def __init__(self, name, id, path):
+        super().__init__(name)
+        self.gds_path = path
+        self.id = id
+        
+        self.points_to_probe = np.array([],[])
+        if self.gds_path != None and self.gds_path != "None":
+            self.generate_points_to_probe()
+
+
+    def generate_points_to_probe(self):
+        self.points_to_probe = []
+        gdsii = gdspy.GdsLibrary(infile=self.gds_path)
+        target_layer = 50
+        target_datatype = 0
+        
+        for cell_name in gdsii.cells:
+            cell = gdsii.cells[cell_name]
+            
+            polygons = cell.get_polygons(by_spec=(target_layer, target_datatype))
+            self.points_to_probe = np.array([[],[]])
+            
+            for polygon in polygons:
+                if len(polygon) == 4:
+                    x_center = polygon[:, 0].mean()
+                    y_center = polygon[:, 1].mean()
+                    temp_center = np.array([[x_center],[y_center]])
+                    self.points_to_probe = np.hstack((self.points_to_probe, temp_center))
+
+            return
+
+class wafer_chip(QGraphicsRectItem):
+    def __init__(self, x, y, size, chip_type, irl_size, main_window, rowcol):
+        super().__init__(x, y, size, size)
+        self.irl_coordinates = np.array([[],[]])
+        self.main_window = main_window
+        self.irl_size = irl_size
+        self.chip_type = int(chip_type)
+        
+        self.rowcol = rowcol
+
+        self.setBrush(QBrush(QColor(colornames[self.chip_type])))
+        self.setPen(QColor("black"))
+        self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(Qt.LeftButton)
+
+        self.probe_info = None
+        self.update_probe_points()
+
+    def update_probe_points(self):
+        for index in range(self.main_window.ui.listWidget.count()):
+            category = self.main_window.ui.listWidget.item(index)
+            if category.id == self.chip_type:
+                if category.points_to_probe.size >0:
+                    probe_path = category.points_to_probe
+                    probe_path = probe_path/1000
+                    self.probe_info = np.zeros((3,probe_path.shape[1]))
+                    self.probe_info[:3,:] = -1
+                    self.probe_info[:2,:] = probe_path
+
+    def insert_probed_resistance(self, coord, resistance):
+        
+        # Use tolerance for floating point comparison
+        tolerance = 1e-6
+        mask = (np.abs(self.probe_info[0] - coord[0,0]) < tolerance) & \
+            (np.abs(self.probe_info[1] - coord[1,0]) < tolerance)
+        indices = np.where(mask)[0]
+        
+        if len(indices) > 0:
+            self.probe_info[2, indices[0]] = resistance
+
+
+
+    def mousePressEvent(self, event):
+        # get reference to main app from scene or item
+
+        if getattr(self.main_window, 'is_assigning_mode', False):
+            new_id = self.main_window.active_chip_type
+            self.chip_type = new_id
+
+            self.setBrush(QColor(colornames[self.chip_type]))  # optional visual feedback
+            self.update_probe_points()
+
+        elif getattr(self.main_window, 'is_probing_mode', False):
+            self.main_window.selected_chip = self
+            self.main_window._probe_confirm_btn.setEnabled(True)
+
+
+        else:
+            super().mousePressEvent(event)
+    
+    def set_irl_coords(self, x, y):
+        self.irl_coordinates = np.array([[x],[y]])
+
+class serial_handler():
+    def __init__(self):
+        self.ser = None
+        self.ser_name = None
+
+
+    def list_serial_ports(self):
+        ports = list(serial.tools.list_ports.comports())
+        ports = [port for port in ports if "Bluetooth" not in str(port)]
+        return [str(port.device) for port in ports]
+    
+    def connect_serial_port(self, port):
+        try:
+            if self.ser!=None:
+                self.ser.close()
+            self.ser = serial.Serial(port, 115200, timeout=1)
+            time.sleep(2)
+
+
+        except serial.SerialException as e:
+            return False
+
+        finally:
+            if self.ser!=None and self.ser.is_open:
+                self.ser_name = port
+                return True
+            
+    def check_serial(self):
+        if self.ser is not None:
+      
+            ports = self.list_serial_ports()
+            yeet = False
+            for port in ports:
+                if self.ser_name == port:
+                    yeet = True
+            
+            if yeet is False:
+                self.ser.close()
+
+            return yeet
+        
+    def write(self, message):
+        self.ser.write(message.encode())
+        self.ser.flush()
+
+    def flush(self):
+        self.ser.flush()
+        self.ser.reset_input_buffer()
+
+    def read(self):
+        return self.ser.readline().decode().strip()
+
+    def char_read(self):
+        return self.ser.read(1).decode()
+
+    def in_waiting(self):
+        return self.ser.in_waiting
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        pygame.init()
+        pygame.joystick.init()
+
+        self.list = [3.04, 2, 4, 6, 8, 6, 4, 2]
+
+        # Set up UI
+
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        
+        self.ser = serial_handler()
+
+        self.probe_handler = probe_handler(self.ser)
+
+        self.camera = camera_handler(self.probe_handler, self)
+
+       
+
+        self.drop_dist = 0
+
+        self.connected = False
+        self.ser_name = None
+        self.gamepad_connected = False
+        self.joystick = None
+
+        self.manual = False
+
+        self.show_camera = False
+
+
+        self.active_chip_type = None
+        self.is_assigning_mode = False
+
+        # Attach functions to buttons
+
+        self.ui.ser_connect.clicked.connect(self.connect_serial_port)
+        self.ui.controller_connect.clicked.connect(self.find_gamepads)
+        self.ui.manual_drive.clicked.connect(self.manual_set)
+        self.ui.cam_show.clicked.connect(self.camera_set)
+
+        self.ui.set_align_1.clicked.connect(self.align_1)
+        self.ui.set_align_2.clicked.connect(self.align_2)
+        self.ui.confirm_align.clicked.connect(self.apply_transformation)
+
+        self.ui.wafer_create.clicked.connect(self.create_wafer)
+        self.ui.add_new_chip_type.clicked.connect(self.create_chip_type)
+        self.ui.edit_selected_chip_type.clicked.connect(self.edit_chip_type)
+
+        self.ui.assign_chip_to_wafer.clicked.connect(self.assign_chip_type)
+        
+        self.ui.probe_individual.clicked.connect(self.probe_single_chip)
+        self.ui.Set_drop_height.clicked.connect(self.drop_test)
+        self.ui.export_2.clicked.connect(self.export)
+        
+        self.ui.see_resistance.clicked.connect(self.check_single_chip)
+        self.ui.pushButton_2.clicked.connect(self.connect_meter)
+        self.ui.MultimeterAddress.setText(f"{config["device"]["address"]}")
+        self.ui.cam_input.setText(f"{config["camera"]["default_cam"]}")
+
+    def connect_meter(self):
+        if self.ui.MultimeterAddress.text() != None:
+            self.camera.connect_meter(self.ui.MultimeterAddress.text())
+        else:
+            msg = QMessageBox()
+            msg.setWindowTitle("Error")
+            msg.setText("Please enter a VISA Address for your device")
+            msg.exec()
+
+
+    def gotomark1(self):
+        pass
+
+    def gotomark2(self):
+        pass
+    
+    def printloc(self):
+        print(self.probe_handler.find_location())
+
+    def start_camera(self, cam_num):
+        self.camera.start_camera(cam_num)
+
+    def update_camera(self):
+        self.camera.update_camera()
+
+    def manual_set(self):
+        if self.connected:
+            self.manual = not self.manual
+
+        if self.manual:
+            self.ui.manual_drive.setText("Disable Manual Drive")
+        else:
+            self.ui.manual_drive.setText("Enable Manual Drive")
+    
+    def camera_set(self):
+        self.show_camera = not self.show_camera
+
+    def list_serial_ports(self):
+        self.ui.ser_dropdown.clear()
+        self.ui.ser_dropdown.addItems(self.ser.list_serial_ports())
+
+    def connect_serial_port(self):
+        selected_text = str(self.ui.ser_dropdown.currentText())
+
+        if self.ser.connect_serial_port(selected_text):
+            msg = QMessageBox()
+            msg.setWindowTitle("Connected")
+            msg.setText("COM connection work :]")
+            self.ui.label.setText("Connected:")
+            msg.exec()
+            self.connected = True
+            self.homing()
+
+        else:
+            msg = QMessageBox()
+            msg.setWindowTitle("Failed to Connect")
+            msg.setText("COM connection didn't work :[")
+            self.ui.label.setText("COM PORTS: ")
+            msg.exec()
+
+    def check_serial(self):
+        if self.ser.check_serial() is False:
+            self.connected = False
+            self.ui.label.setText("COM PORT: ")  
+
+    def homing(self):
+        if self.connected:     
+            self.probe_handler.homing()
+
+    def find_gamepads(self):
+        if pygame.joystick.get_count() == 0:
+            self.joystick = None
+            self.ui.controller_status.setText("No controller connected")
+            self.gamepad_connected = False
+        else:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
+            self.ui.controller_status.setText(self.joystick.get_name())
+            self.ui.gamepad_connected = True
+
+    def game_pad_move(self):
+        mult = 0.06
+        if self.manual:
+            if self.joystick != None:
+                pygame.event.pump()
+
+                if self.joystick.get_button(int(config["keybinds"]["speed-mode-1"])):
+                    mult = 0.5
+
+                elif self.joystick.get_button(int(config["keybinds"]["speed-mode-2"])):
+                    mult = 3
+                else:
+                    mult = 0.06 
+
+            if keyboard.is_pressed("shift"):
+                mult = 0.5
+            elif keyboard.is_pressed("ctrl"):
+                mult = 3
+            else:
+                mult = 0.06
+            
+            y_axis = 0
+            x_axis = 0
+
+            if self.joystick!= None:
+                y_axis = -self.joystick.get_axis(int((config["keybinds"]["y-axis"])))
+                x_axis = self.joystick.get_axis(int(config["keybinds"]["x-axis"]))
+            
+                if abs(x_axis) < 0.05:
+                    x_axis = 0
+                if abs(y_axis) < 0.05:
+                    y_axis = 0
+
+            if keyboard.is_pressed('w'):
+                y_axis = 1
+            elif keyboard.is_pressed('s'):
+                y_axis = -1
+
+            if keyboard.is_pressed('a'):
+                x_axis = -1
+            elif keyboard.is_pressed('d'):
+                x_axis = 1
+
+            if abs(x_axis) > 0.1 or abs(y_axis) > 0.1:
+                self.probe_handler.rel_move(x=x_axis * mult, y=y_axis * mult, z=0, feed=500)
+                time.sleep(0.2)  # prevent spamming
+
+                   
+            if self.joystick != None:
+                if self.joystick.get_button(int(config["keybinds"]["z-down-button"])):
+                    self.probe_handler.rel_move(0,0,-0.4, 500)
+                    time.sleep(0.25)
+
+                if self.joystick.get_button(int(config["keybinds"]["z-up-button"])) or keyboard.is_pressed("q"):
+                    self.probe_handler.rel_move(0,0,0.4, 500)
+                    time.sleep(0.25)
+
+            if keyboard.is_pressed("e"):
+                self.probe_handler.rel_move(0,0,-0.4, 500)
+                time.sleep(0.25)
+            if keyboard.is_pressed("q"):
+                    self.probe_handler.rel_move(0,0,0.4, 500)
+                    time.sleep(0.25)
+            
+
+    def align_1(self):
+        self.camera.align_1()
+    
+    def align_2(self):
+        self.camera.align_2()
+
+    def apply_transformation(self):
+        self.camera.apply_transformation()
+
+    def wafer_populate(self, list, irlsize):
+        scene = QGraphicsScene()
+        width = max(len(row) for row in list)
+        rowcenter = width-1 * 16
+
+        for row in range(len(list)):
+            
+            if len(list[row])%2==1:
+                offset = rowcenter - (len(list[row])//2) * 32
+            else:
+                offset = rowcenter - ((len(list[row])/2) - 0.5) * 32
+            
+            y = row * 32
+
+            for col in range(len(list[row])):
+                rowcol = np.array([[row],[col]])
+                chip = wafer_chip(offset, y, 30, list[row][col], irlsize, self, rowcol)
+
+                chip.set_irl_coords((offset - rowcenter)/32 * irlsize, ((len(list)-1)/2.0 - row) * irlsize)
+                scene.addItem(chip)
+                offset = offset + 32
+
+        self.ui.graphicsView.setScene(scene)
+
+    def create_wafer(self):
+        global highest_id
+        array = []
+        file_path, _ = QFileDialog.getOpenFileName(
+        parent=None,
+        caption="Open Wafer txt file",
+        filter="txt files (*.txt);;All Files (*)"
+        )
+        
+        self.ui.listWidget.clear()
+
+        Hannah = False
+        chip_id = None
+        path = None
+        preset_paths = {}
+
+        with open(file_path, 'r') as file:
+            for line in file:
+                if line.strip() == 'preset paths':
+                    Hannah = True
+                elif line.strip() and Hannah == False:  # Skip empty lines:
+                    numbers = [int(num.strip()) for num in line.strip().split(',') if num.strip()]
+                    array.append(numbers)
+                elif Hannah == True:
+                    if ',' not in line:
+                        continue
+
+                    chip_id_str, path_str, name = line.split(',', 2)
+                    chip_id = int(chip_id_str.strip())
+                    path = path_str.strip()
+                    name = name.strip()
+                    preset_paths[chip_id] = [path,name]
+
+        
+        size, ok = QInputDialog.getText(None, "Input", "How many mm is one side of wafer?:")
+            
+        if ok:
+            try:
+                size = float(size)
+            except ValueError:
+                return 
+            
+            finally:
+                unique_types = set()
+
+                for row in array:
+                    for num in row:
+                        unique_types.add(num)
+                for chip_type in unique_types:
+                    if chip_type in preset_paths:
+                        if preset_paths[chip_type][0] != "None":
+                            item = wafer_chip_type(preset_paths[chip_type][1], chip_type, Path(preset_paths[chip_type][0]))
+                        else:
+                            item = wafer_chip_type(preset_paths[chip_type][1], chip_type, None)
+
+                        item.setForeground(QBrush(QColor(colornames[chip_type])))
+
+                    else:
+                        item = wafer_chip_type(f"Chip {chip_type}", chip_type)
+                        item.setForeground(QBrush(QColor(colornames[chip_type])))
+
+                    self.ui.listWidget.addItem(item)
+                    highest_id+=1
+
+                    self.wafer_populate(array, size)
+
+
+    def edit_chip_type(self):
+        window = QDialog(self)
+        window.setWindowTitle(f"Edit {self.ui.listWidget.currentItem().text()}")
+        layout = QVBoxLayout(window)
+
+        # Name input
+        layout.addWidget(QLabel("Chip Name:"))
+        name_input = QLineEdit()
+        name_input.setText(self.ui.listWidget.currentItem().text())
+        layout.addWidget(name_input)
+
+        # GDS file selector
+        gds_path = None
+        gds_label = QLabel(f"{self.ui.listWidget.currentItem().gds_path}")
+        layout.addWidget(gds_label)
+
+        def getfile():
+            nonlocal gds_path
+            file_path, _ = QFileDialog.getOpenFileName(window, "Select GDS File", "", "GDS Files (*.gds);;All Files (*)")
+            if file_path:
+                gds_path = file_path
+                gds_label.setText(file_path)
+
+        gds_button = QPushButton("Select GDS File")
+        gds_button.clicked.connect(getfile)
+        layout.addWidget(gds_button)
+
+        # Confirm button
+        def accept():
+            item = self.ui.listWidget.currentItem()
+            item.setText(name_input.text())
+            item.gds_path = gds_path  # you may want to store this elsewhere
+            if gds_path is not None:
+                item.generate_points_to_probe()
+            window.accept()
+
+        confirm_button = QPushButton("Save")
+        confirm_button.clicked.connect(accept)
+        layout.addWidget(confirm_button)
+
+        window.setLayout(layout)
+        window.exec()
+
+    def create_chip_type(self):
+        global highest_id
+        window = QDialog(self)
+        window.setWindowTitle("create a new chip type :D")
+        layout = QVBoxLayout(window)
+
+        # Name input
+        layout.addWidget(QLabel("Chip Name:"))
+        name_input = QLineEdit()
+        name_input.setText("choose a funny name for your new chip type!")
+        layout.addWidget(name_input)
+
+        # GDS file selector
+        gds_path = None
+        gds_label = QLabel("No file selected.")
+        layout.addWidget(gds_label)
+
+        def getfile():
+            nonlocal gds_path
+            file_path, _ = QFileDialog.getOpenFileName(window, "Select GDS File", "", "GDS Files (*.gds);;All Files (*)")
+            if file_path:
+                gds_path = file_path
+                gds_label.setText(file_path)
+
+        gds_button = QPushButton("Select GDS File")
+        gds_button.clicked.connect(getfile)
+        layout.addWidget(gds_button)
+
+        # Confirm button
+        def accept():
+            global highest_id
+            item = wafer_chip_type(name_input.text(), highest_id+1)
+            highest_id += 1
+            item.gds_path = gds_path
+            if gds_path is not None:
+                item.generate_points_to_probe()
+            self.ui.listWidget.addItem(item)
+            window.accept()
+            
+
+        confirm_button = QPushButton("Save")
+        confirm_button.clicked.connect(accept)
+        layout.addWidget(confirm_button)
+
+        window.setLayout(layout)
+        window.exec()
+
+    def assign_chip_type(self):
+        dialog = QDialog()
+        dialog.setWindowTitle("Assign type to die on wafer")
+
+        layout = QVBoxLayout(dialog)
+
+
+        if self.ui.listWidget.currentItem() is not None:
+            end = QPushButton("end assigning")
+            layout.addWidget(end)
+
+            layout.addWidget(QLabel(f"Currently assigning {self.ui.listWidget.currentItem().text()}"))
+            self.active_chip_type = self.ui.listWidget.currentItem().id
+            self.is_assigning_mode = True  # flag for later
+
+
+            def end_assignment():
+                self.active_chip_type = None
+                self.is_assigning_mode = False
+                dialog.accept()
+
+            end.clicked.connect(end_assignment)
+            dialog.show()
+
+        
+        else:
+            layout.addWidget(QLabel("don't be indecisive! choose a chip type first :]"))
+            dialog.exec()
+
+    def probe_single_chip(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select a Chip to Probe")
+        layout = QVBoxLayout(dialog)
+        
+        info = QLabel("Click a chip on the wafer to probe.")
+        layout.addWidget(info)
+
+        confirm_btn = QPushButton("Confirm")
+        confirm_btn.setEnabled(False)  # only enable after selection
+        layout.addWidget(confirm_btn)
+
+        # Flag to enable chip selection mode
+        self.is_probing_mode = True
+        self.selected_chip = None
+        
+        def confirm_selection():
+            dialog.accept()
+
+            self.is_probing_mode = False
+
+            chip_type = self.selected_chip.chip_type
+
+            for index in range(self.ui.listWidget.count()):
+                category = self.ui.listWidget.item(index)
+                if category.id == chip_type:
+                    probe_path = category.points_to_probe
+                    probe_path = probe_path/1000
+
+            size = self.selected_chip.irl_size
+            center = self.selected_chip.irl_coordinates
+            self.camera.plot_die(die_size_mm=size, points_to_probe=self.sort_probe_path(probe_path), die_center=center)
+
+        confirm_btn.clicked.connect(confirm_selection)
+
+        # Save reference so we can enable button when clicked
+        self._probe_dialog = dialog
+        self._probe_confirm_btn = confirm_btn
+
+        dialog.show()
+
+    def sort_probe_path(self, array):
+        sorted = array[:, np.argsort(array[1])[::-1]]  # sort Y descending
+        row_start = 0
+        currently_right = True
+
+        for i in range(1, sorted.shape[1]):
+            y = sorted[1, i]
+            if abs(y - sorted[1, row_start]) > 0.02:
+                row_end = i
+                sub = sorted[:, row_start:row_end]
+                if currently_right:
+                    sorted_sub = sub[:, np.argsort(sub[0])]  # sort by X ascending
+                else:
+                    sorted_sub = sub[:, np.argsort(sub[0])[::-1]]  # sort by X descending
+                
+                sorted[:, row_start:row_end] = sorted_sub
+                row_start = row_end
+                currently_right = not currently_right
+
+        # Final group (end of array)
+        sub = sorted[:, row_start:]
+        if currently_right:
+            sorted_sub = sub[:, np.argsort(sub[0])]
+        else:
+            sorted_sub = sub[:, np.argsort(sub[0])[::-1]]
+        sorted[:, row_start:] = sorted_sub
+
+        return sorted
+
+    def drop_test(self):
+        self.camera.set_drop_dist()
+
+    def export(self):
+        
+        if self.ui.graphicsView.scene().items() == None:
+            msg = QMessageBox()
+            msg.setWindowTitle("Hold Up")
+            msg.setText("You haven't made a wafer to export yet")
+            msg.exec()
+
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(None, "Save File", "new_wafer.txt", "Text Files (*.txt)")
+
+            if file_path:
+                with open(file_path, "w") as f:
+                    current_row = self.ui.graphicsView.scene().items()[0].irl_coordinates[1,0]
+                    for chip in self.ui.graphicsView.scene().items():
+                        if chip.irl_coordinates[1,0] == current_row:
+                            f.write(f"{chip.chip_type},")
+                        if chip.irl_coordinates[1,0] != current_row:
+                            f.write("\n")
+                            f.write(f"{chip.chip_type},")
+                            current_row = chip.irl_coordinates[1,0]
+
+                    f.write("\n")
+                    f.write("preset paths")
+                    f.write("\n")
+
+
+                    for i in range(self.ui.listWidget.count()):
+                        type = self.ui.listWidget.item(i)
+                        f.write(f"{type.id},{type.gds_path},{type.text()}")
+                        f.write("\n")                    
+
+    def check_single_chip(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select a Chip to view info for")
+        layout = QVBoxLayout(dialog)
+        
+        info = QLabel("click on a chip to see its deepest secrets.")
+        layout.addWidget(info)
+
+        confirm_btn = QPushButton("Confirm")
+        confirm_btn.setEnabled(False)  # only enable after selection
+        layout.addWidget(confirm_btn)
+
+        # Flag to enable chip selection mode
+        self.is_probing_mode = True
+        self.selected_chip = None
+        
+        def confirm_selection():
+            dialog.accept()
+
+            self.is_probing_mode = False
+
+            chip_type = self.selected_chip.chip_type
+
+            for index in range(self.ui.listWidget.count()):
+                category = self.ui.listWidget.item(index)
+                if category.id == chip_type:
+                    break
+
+            self.viewer = ChipViewer(category.gds_path, category.text(), self.selected_chip.rowcol, self.selected_chip.probe_info)
+
+        confirm_btn.clicked.connect(confirm_selection)
+
+        # Save reference so we can enable button when clicked
+        self._probe_dialog = dialog
+        self._probe_confirm_btn = confirm_btn
+
+        dialog.show()

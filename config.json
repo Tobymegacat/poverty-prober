@@ -1,0 +1,28 @@
+{
+  "device": {
+    "instrument_type": "pymeasure.instruments.agilent.Agilent34410A",
+    "address": "24"
+  },
+
+    "keybinds": {
+        "x-axis": "0",
+        "y-axis": "4",
+        "z-up-button": "4",
+        "z-down-button": "5",
+        "speed-mode-1": "0",
+        "speed-mode-2": "1"
+    },
+
+    "printer defaults": {
+        "homing": "G28 W"
+    },
+
+    "camera": {
+        "default_cam": "1"
+    }
+
+
+
+}
+
+

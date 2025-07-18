@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Pytest
+.cache/
+
+# UI build
+*.ui.py
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Pipenv
+Pipfile.lock
+
+# Dist
+build/
+dist/
+*.egg-info/
+
+# Secrets (if you store config/secrets)
+.env
+*.key
