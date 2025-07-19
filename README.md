@@ -5,7 +5,7 @@ This prober was designed around a Prusa MK3s frame, but any printer that accepts
 
 # Hardware
 If you are looking to build a cheap probe station, the CAD files included can be 3D printed or machined and fitted onto a Prusa i3 MK3s. 
-There are also files for parts to convert a manual prober into an automated prober.
+There are also files for parts to convert a manual prober into an automated prober. 
 Please refer to this Google document -> [Build Guide](https://docs.google.com/document/d/1jpKJtrroQCTVU71WwhqqQFOAk-dV8LYzDlW9VzFjXhk/edit?usp=sharing)
 
 # Software 
@@ -14,6 +14,8 @@ This software runs on Python 3.12.2. To run it, you will most likely have to cre
 You will need a multimeter for this project. Most lab multimeters (E.G Keithley, Agilent, Fluke) have GPIB interface built in, which this project uses for data collection. To use these, you must install National Instrument drivers -> [Download NI 488.2 Driver](https://www.ni.com/en/support/downloads/drivers/download.ni-488-2.html?srsltid=AfmBOoqDNW6VPZ1aSyrHQnoAGYbkDJ60jkX1j2CEZqXa2sz1cAuOPGQv#559044)
 
 To run the GDSpy library used for reading GDS files, you will also need to install Visual Studio C++ Build Tools -> [Install here](https://visualstudio.microsoft.com/downloads/?q=build+tools)
+
+All of the libraries used are in the requirements.txt and can be installed via PIP. 
 
 # Using the automated prober
 I've tried to make operation as not confusing as possible, but I am not very good at that. Please refer to this Google Document with detailed picture instructions for how to operate your probe machine, as well as how to use the software and read measurements -> (Instructions)[https://docs.google.com/document/d/1vez7zo_DF2WveKpVUwSjUk-TLnuJKJ8-mlyRiejgi00/edit?usp=sharing]
