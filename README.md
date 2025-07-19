@@ -8,7 +8,7 @@ If you are looking to build a cheap probe station, the CAD files included can be
 There are also files for parts to convert a manual prober into an automated prober.
 Please refer to this Google document -> [Build Guide](https://docs.google.com/document/d/1jpKJtrroQCTVU71WwhqqQFOAk-dV8LYzDlW9VzFjXhk/edit?usp=sharing)
 
-#Software 
+# Software 
 This software runs on Python 3.12.2. To run it, you will most likely have to create a virtual environment. Python docs will explain it much better than I can -> [Python Docs](https://docs.python.org/3/library/venv.html)
 
 You will need a multimeter for this project. Most lab multimeters (E.G Keithley, Agilent, Fluke) have GPIB interface built in, which this project uses for data collection. To use these, you must install National Instrument drivers -> [Download NI 488.2 Driver](https://www.ni.com/en/support/downloads/drivers/download.ni-488-2.html?srsltid=AfmBOoqDNW6VPZ1aSyrHQnoAGYbkDJ60jkX1j2CEZqXa2sz1cAuOPGQv#559044)
