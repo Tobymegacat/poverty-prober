@@ -125,15 +125,20 @@ class Ui_MainWindow(object):
 
         self.verticalLayout.addWidget(self.probe_all)
 
-        self.transformed_move = QPushButton(self.gridLayoutWidget_3)
-        self.transformed_move.setObjectName(u"transformed_move")
+        # self.transformed_move = QPushButton(self.gridLayoutWidget_3)
+        # self.transformed_move.setObjectName(u"transformed_move")
 
-        self.verticalLayout.addWidget(self.transformed_move)
+        # self.verticalLayout.addWidget(self.transformed_move)
 
         self.see_resistance = QPushButton(self.gridLayoutWidget_3)
         self.see_resistance.setObjectName(u"see_resistance")
 
         self.verticalLayout.addWidget(self.see_resistance)
+
+        self.visualize_wafer = QPushButton(self.gridLayoutWidget_3)
+        self.visualize_wafer.setObjectName(u"visualize_wafer")
+        self.visualize_wafer.setText("Visualize Entire Wafer")
+        self.verticalLayout.addWidget(self.visualize_wafer)
 
         self.verticalSpacer_2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
 
@@ -278,7 +283,7 @@ class Ui_MainWindow(object):
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"Probing stuff", None))
         self.probe_individual.setText(QCoreApplication.translate("MainWindow", u"Probe Individual Chips", None))
         self.probe_all.setText(QCoreApplication.translate("MainWindow", u"Probe all chips of 1 type", None))
-        self.transformed_move.setText(QCoreApplication.translate("MainWindow", u"Move to wafer coordinates", None))
+        # self.transformed_move.setText(QCoreApplication.translate("MainWindow", u"Move to wafer coordinates", None))
         self.see_resistance.setText(QCoreApplication.translate("MainWindow", u"View Single Chip Resistance", None))
         self.cam_show.setText(QCoreApplication.translate("MainWindow", u"Start Cam Feed", None))
         self.confirm_align.setText(QCoreApplication.translate("MainWindow", u"Confirm Alignment", None))

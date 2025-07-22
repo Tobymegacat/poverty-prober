@@ -260,6 +260,9 @@ class camera_handler():
 
     def align_1(self):
         # Enter alignment mode and freeze frame
+        if self.alignment_mode == True:
+            return
+
         self.alignment_mode = True
         self.align1 = []
         
@@ -325,6 +328,8 @@ class camera_handler():
         self.alignment_mode = False        
 
     def align_2(self):
+        if self.alignment_mode == True:
+            return
         # Enter alignment mode and freeze frame
         self.alignment_mode = True
         self.align2 = []
@@ -411,6 +416,8 @@ class camera_handler():
             msg.exec()
 
     def plot_die(self, die_size_mm, points_to_probe, die_center, die_object):
+        
+        failed_probe = coords = np.empty((2, 0))
 
         sigma = False
         if not self.instrument_connected:
@@ -622,6 +629,9 @@ class camera_handler():
 
             resistance = resistance - baseline
 
+            if resistance > 1000000:
+                failed_probe = np.hstack((failed_probe, xy))
+
             # print(resistance)
 
             totoro = np.array([[points_to_probe[0,i]],[points_to_probe[1,i]]])
@@ -647,57 +657,96 @@ class camera_handler():
                 # print("ESC pressed , exiting")
                 break
 
+        #reprobe failed junctions
 
+        for i in range(failed_probe.shape[1]):
+            xy = np.array([[failed_probe[0,i]],[failed_probe[1,i]]])
+            xy = xy + die_center
 
-            #region
-            # closest_square_center = None
-            # closest_square_2_center = None
-
-            # closest_square_dist = float('inf')
-            # closest_square_2_dist = float('inf')
-
-            # contours, _ = cv2.findContours(final, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            # for cnt in contours:
-            #     area = cv2.contourArea(cnt)
-            #     if area < 500:
-            #         continue
-
-            #     peri = cv2.arcLength(cnt, True)
-            #     approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-
-            #     if len(approx) == 4 and cv2.isContourConvex(approx):
-            #         M = cv2.moments(approx)
-            #         if M["m00"] != 0:
-            #             cx = int(M["m10"] / M["m00"])
-            #             cy = int(M["m01"] / M["m00"])
-            #             distance = np.hypot(cx - img_center[0,0], cy - img_center[1,0])
-
-            #             if distance < closest_square_dist:
-            #                 closest_square_dist = distance
-            #                 closest_square_center = np.array([[cx],[cy]])
-            #             elif distance > closest_square_dist and distance < closest_square_2_dist:
-            #                 closest_square_2_dist = distance
-            #                 closest_square_2_center = np.array([[cx],[cy]])
+            self.prober.transformed_move(xy)
             
-            # probe_center = (closest_square_center + closest_square_2_center)/2
-            # pixel_offset = probe_center - img_center
-            # temp2 = 0.001*self.microns_per_pixel*(pixel_offset)
+            time.sleep(2)
 
-            # if temp2[0,0] > 0.03:
-            #     self.prober.rel_move(-0.06, 0, None, 200)
-            # if temp2[0,0] < -0.03:
-            #     self.prober.rel_move(0.06, 0, None, 200)
-            # if temp2[1,0] > 0.03:
-            #     self.prober.rel_move(0, -0.06, None, 200)
-            # if temp2[1,0] < -0.03:
-            #     self.prober.rel_move(0, 0.06, None, 200)
-
-
-            # self.update_camera()
+            final = self.update_camera()[1]
             
-            # time.sleep(4)
-            #endregion
+            key = cv2.waitKey(1) & 0xFF
+
+
+            probe_center, boost = self.hough_lines_corner_find(final)
+            pixel_offset = probe_center - img_center
+            temp2 = 0.001*self.microns_per_pixel*(pixel_offset)
+
+            if temp2[0,0] > 0.05:
+                self.prober.rel_move(-0.06, 0, None, 200)
+            if temp2[0,0] < -0.05:
+                self.prober.rel_move(0.06, 0, None, 200)
+            
+            
+            if boost != 0:
+                self.prober.rel_move(0, boost*0.06, None, 200)
+                print(f"boosted {boost}")
+            if temp2[1,0] > 0.03:
+                self.prober.rel_move(0, 0.06, None, 200)
+            if temp2[1,0] < -0.03:
+                self.prober.rel_move(0, -0.06, None, 200)
+        
+            final = self.update_camera()[1] 
+            key = cv2.waitKey(1) & 0xFF
+
+
+
+            if key == 27:  # ESC key
+                # print("ESC pressed, exiting")
+                break
+
+            time.sleep(1)
+
+            baseline = 0
+
+            for y in range(10):
+                baseline += self.multimeter.resistance
+
+            baseline = baseline/10
+
+
+            self.prober.rel_move(0,0,(-self.z_drop * 0.04),200)
+            
+            self.prober.turn_on_measuring()
+
+            time.sleep(3)
+            
+            resistance = 0
+            for x in range(10):
+                resistance += self.multimeter.resistance
+
+            resistance = resistance/10
+
+            resistance = resistance - baseline
+
+            # print(resistance)
+
+            totoro = np.array([[points_to_probe[0,i]],[points_to_probe[1,i]]])
+
+            die_object.insert_probed_resistance(totoro, resistance)
+            
+            self.prober.turn_off_measuring()
+            key = cv2.waitKey(1) & 0xFF
+
+            final = self.update_camera()[1]
+            if key == 27:  # ESC key
+                # print("ESC pressed, exiting")
+                break
+
+            time.sleep(3)
+
+            self.prober.rel_move(0,0,(self.z_drop * 0.04),200)
+
+            final = self.update_camera()[1]
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == 27:  # ESC key
+                # print("ESC pressed , exiting")
+                break
 
     
     def hough_lines_corner_find(self, img):
@@ -800,6 +849,5 @@ class camera_handler():
                 steps = None
             finally:
                 self.z_drop = steps
-
 
 

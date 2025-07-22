@@ -8,6 +8,7 @@ import numpy as np
 import gdspy
 import math
 import keyboard
+from .wafer_visualizer import WaferVisualizer
 
 from pathlib import Path
 
@@ -341,6 +342,8 @@ class MainWindow(QMainWindow):
         self.ui.MultimeterAddress.setText(f"{config["device"]["address"]}")
         self.ui.cam_input.setText(f"{config["camera"]["default_cam"]}")
         self.ui.probe_all.clicked.connect(self.probe_all)
+        # self.ui.transformed_move.clicked.connect(self.manual_move)
+        self.ui.visualize_wafer.clicked.connect(self.visualize_all)
 
 
     def connect_meter(self):
@@ -528,6 +531,8 @@ class MainWindow(QMainWindow):
 
                 chip.set_irl_coords((offset - rowcenter)/32 * irlsize, ((len(list)-1)/2.0 - row) * irlsize)
                 scene.addItem(chip)
+
+                print(chip.pos())
                 offset = offset + 32
 
         self.ui.graphicsView.setScene(scene)
@@ -907,6 +912,11 @@ class MainWindow(QMainWindow):
         self._probe_confirm_btn = confirm_btn
 
         dialog.show()
+
+
+    def visualize_all(self):
+        self.viewer = WaferVisualizer(self.ui.graphicsView.scene(), self.ui.listWidget, self.camera)
+
 
     def manual_move(self):
         text, ok = QInputDialog.getText(None, "Input", "enter theoretical coords of this box in x,y format:")
