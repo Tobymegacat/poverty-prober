@@ -28,6 +28,7 @@ class camera_handler():
 
         self.instrument_connected = False
 
+        self.multimeter = None
         self.mainwindow = mainwindow
         self.alignment_mode = False
         self.frozen_frame = None
@@ -55,7 +56,7 @@ class camera_handler():
     def connect_meter(self, address):
         try:
             adapter = VISAAdapter(f"GPIB::{address}::INSTR")
-            instrument = InstrumentClass(adapter)
+            self.multimeter = InstrumentClass(adapter)
             
             # Try a command to ensure it's responsive
             # print("ID:", instrument.id)
@@ -143,7 +144,7 @@ class camera_handler():
             if stats[i, cv2.CC_STAT_AREA] > 100:  # Adjust if small features are being removed
                 final[labels == i] = 255
 
-        final = cv2.dilate(final, np.ones((3, 3), np.uint8), iterations=2)
+        final = cv2.dilate(final, np.ones((3, 3), np.uint8), iterations=1)
         output = cv2.cvtColor(final, cv2.COLOR_GRAY2BGR)
         #endregion
 
@@ -230,8 +231,8 @@ class camera_handler():
         cv2.imshow("processed image", output)
 
         key = cv2.waitKey(1) & 0xFF
-        # if key == 13:
-        #     print(focus_measure)
+        if key == 13:
+             print(focus_measure)
 
         return [final, smoothed, focus_measure, frame]
 
@@ -409,7 +410,7 @@ class camera_handler():
 
             msg.exec()
 
-    def plot_die(self, die_size_mm, points_to_probe, die_center):
+    def plot_die(self, die_size_mm, points_to_probe, die_center, die_object):
 
         sigma = False
         if not self.instrument_connected:
@@ -450,16 +451,16 @@ class camera_handler():
 
         fuzziness = self.update_camera()[2]
         down = True
-        while fuzziness < 70:
+        while fuzziness < 180:
             prev = fuzziness
             if down:
-                self.prober.rel_move(0,0,-0.4,200)
+                self.prober.rel_move(0,0,-0.04,200)
                 time.sleep(1)
                 fuzziness = self.update_camera()[2]
                 if fuzziness < prev:
                     down = False
             else:
-                self.prober.rel_move(0,0,0.4,200)
+                self.prober.rel_move(0,0,0.04,200)
                 time.sleep(1)
                 fuzziness = self.update_camera()[2]
 
@@ -578,12 +579,13 @@ class camera_handler():
                 self.prober.rel_move(0.06, 0, None, 200)
             
             
-            # if boost != 0:
-            #     self.prober.rel_move(0, boost*0.06, None, 200)
+            if boost != 0:
+                self.prober.rel_move(0, boost*0.06, None, 200)
+                print(f"boosted {boost}")
             if temp2[1,0] > 0.03:
-                self.prober.rel_move(0, -0.06, None, 200)
-            if temp2[1,0] < -0.06:
                 self.prober.rel_move(0, 0.06, None, 200)
+            if temp2[1,0] < -0.03:
+                self.prober.rel_move(0, -0.06, None, 200)
         
             final = self.update_camera()[1] 
             key = cv2.waitKey(1) & 0xFF
@@ -604,7 +606,7 @@ class camera_handler():
             baseline = baseline/10
 
 
-            self.prober.rel_move(0,0,(-self.z_drop * 0.4),200)
+            self.prober.rel_move(0,0,(-self.z_drop * 0.04),200)
             
 
 
@@ -624,7 +626,7 @@ class camera_handler():
 
             totoro = np.array([[points_to_probe[0,i]],[points_to_probe[1,i]]])
 
-            self.mainwindow.selected_chip.insert_probed_resistance(totoro, resistance)
+            die_object.insert_probed_resistance(totoro, resistance)
             
             self.prober.turn_off_measuring()
             key = cv2.waitKey(1) & 0xFF
@@ -636,7 +638,7 @@ class camera_handler():
 
             time.sleep(3)
 
-            self.prober.rel_move(0,0,(self.z_drop * 0.4),200)
+            self.prober.rel_move(0,0,(self.z_drop * 0.04),200)
 
             final = self.update_camera()[1]
             key = cv2.waitKey(1) & 0xFF

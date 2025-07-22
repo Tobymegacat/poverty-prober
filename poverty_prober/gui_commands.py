@@ -340,6 +340,8 @@ class MainWindow(QMainWindow):
         self.ui.pushButton_2.clicked.connect(self.connect_meter)
         self.ui.MultimeterAddress.setText(f"{config["device"]["address"]}")
         self.ui.cam_input.setText(f"{config["camera"]["default_cam"]}")
+        self.ui.probe_all.clicked.connect(self.probe_all)
+
 
     def connect_meter(self):
         if self.ui.MultimeterAddress.text() != None:
@@ -424,23 +426,30 @@ class MainWindow(QMainWindow):
     def game_pad_move(self):
         mult = 0.06
         if self.manual:
+            
+            zboost = 1
+            pushed = False
             if self.joystick != None:
                 pygame.event.pump()
+                
+                if self.joystick.get_button(int(config["keybinds"]["z-boost"])):
+                    zboost = 10
 
                 if self.joystick.get_button(int(config["keybinds"]["speed-mode-1"])):
                     mult = 0.5
-
+                    pushed = True
                 elif self.joystick.get_button(int(config["keybinds"]["speed-mode-2"])):
                     mult = 3
+                    pushed = True
                 else:
                     mult = 0.06 
-
-            if keyboard.is_pressed("shift"):
-                mult = 0.5
-            elif keyboard.is_pressed("ctrl"):
-                mult = 3
-            else:
-                mult = 0.06
+            if not pushed:
+                if keyboard.is_pressed("shift"):
+                    mult = 0.5
+                elif keyboard.is_pressed("ctrl"):
+                    mult = 3
+                else:
+                    mult = 0.06
             
             y_axis = 0
             x_axis = 0
@@ -470,19 +479,23 @@ class MainWindow(QMainWindow):
 
                    
             if self.joystick != None:
+                
+
                 if self.joystick.get_button(int(config["keybinds"]["z-down-button"])):
-                    self.probe_handler.rel_move(0,0,-0.4, 500)
+                    self.probe_handler.rel_move(0,0,-0.04 * zboost, 500)
                     time.sleep(0.25)
 
-                if self.joystick.get_button(int(config["keybinds"]["z-up-button"])) or keyboard.is_pressed("q"):
-                    self.probe_handler.rel_move(0,0,0.4, 500)
+                if self.joystick.get_button(int(config["keybinds"]["z-up-button"])):
+                    self.probe_handler.rel_move(0,0,0.04 * zboost, 500)
                     time.sleep(0.25)
+
+                
 
             if keyboard.is_pressed("e"):
-                self.probe_handler.rel_move(0,0,-0.4, 500)
+                self.probe_handler.rel_move(0,0,-0.04 * mult, 500)
                 time.sleep(0.25)
             if keyboard.is_pressed("q"):
-                    self.probe_handler.rel_move(0,0,0.4, 500)
+                    self.probe_handler.rel_move(0,0,0.04 * mult, 500)
                     time.sleep(0.25)
             
 
@@ -736,7 +749,10 @@ class MainWindow(QMainWindow):
 
             size = self.selected_chip.irl_size
             center = self.selected_chip.irl_coordinates
-            self.camera.plot_die(die_size_mm=size, points_to_probe=self.sort_probe_path(probe_path), die_center=center)
+            self.camera.plot_die(die_size_mm=size, 
+                                points_to_probe=self.sort_probe_path(probe_path),
+                                die_center=center,
+                                die_object = self.selected_chip)
 
         confirm_btn.clicked.connect(confirm_selection)
 
@@ -745,6 +761,50 @@ class MainWindow(QMainWindow):
         self._probe_confirm_btn = confirm_btn
 
         dialog.show()
+
+    def probe_all(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select a Chip type to probe")
+        layout = QVBoxLayout(dialog)
+        self.selected_type = None
+        info = QLabel("Click a chip type to probe.")
+        layout.addWidget(info)
+
+        confirm_btn = QPushButton("Confirm")
+        confirm_btn.setEnabled(False)  # only enable after selection
+        layout.addWidget(confirm_btn)
+
+        def on_chip_selected(item):
+            self.selected_type = item  # Assume `item` is a custom QListWidgetItem with `chip_type`, etc.
+            confirm_btn.setEnabled(True)
+
+        def confirm_selection():
+            dialog.accept()
+            probe_path = self.selected_type.points_to_probe
+            probe_path = probe_path / 1000
+
+            for item in self.ui.graphicsView.scene().items():
+                if isinstance(item, wafer_chip):
+                    if item.chip_type == self.selected_type.id:
+                        size = item.irl_size
+                        center = item.irl_coordinates
+                        self.camera.plot_die(
+                            die_size_mm=size,
+                            points_to_probe=self.sort_probe_path(probe_path),
+                            die_center=center,
+                            die_object = item
+                        )
+
+        # Connect the list widget click
+        self.ui.listWidget.itemClicked.connect(on_chip_selected)
+        confirm_btn.clicked.connect(confirm_selection)
+
+        self._probe_dialog = dialog
+        self._probe_confirm_btn = confirm_btn
+
+        dialog.show()  # Use exec_() instead of show() to block until closed
+
+
 
     def sort_probe_path(self, array):
         sorted = array[:, np.argsort(array[1])[::-1]]  # sort Y descending
@@ -848,4 +908,16 @@ class MainWindow(QMainWindow):
 
         dialog.show()
 
+    def manual_move(self):
+        text, ok = QInputDialog.getText(None, "Input", "enter theoretical coords of this box in x,y format:")
+        if ok:
+            x,y = text.split(",")
+            try:
+                x = int(x)
+                y = int(y)
+            except ValueError:
+                return
+            
+            xy = np.array([[x],[y]])
+            self.probe_handler.transfomred_move(xy)
     # def probe_all
