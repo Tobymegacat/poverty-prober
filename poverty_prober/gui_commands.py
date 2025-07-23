@@ -852,9 +852,9 @@ class MainWindow(QMainWindow):
         # Initially hide the checkbox frame
         checkbox_frame.hide()
 
-        confirm_btn = QPushButton("Confirm")
-        confirm_btn.setEnabled(False)  # only enable after selection
-        layout.addWidget(confirm_btn)
+        self.confirm_btn = QPushButton("Confirm")
+        self.confirm_btn.setEnabled(False)  # only enable after selection
+        layout.addWidget(self.confirm_btn)
 
         # Flag to enable chip selection mode
         self.is_probing_mode = True
@@ -945,16 +945,14 @@ class MainWindow(QMainWindow):
             if original_chip_selected:
                 original_chip_selected()
             populate_layer_checkboxes()
-            confirm_btn.setEnabled(True)
+            self.confirm_btn.setEnabled(True)
         
         self._on_chip_selected = on_chip_selected
 
-        confirm_btn.clicked.connect(confirm_selection)
+        self.confirm_btn.clicked.connect(confirm_selection)
 
         # Save reference so we can enable button when clicked
         self._probe_dialog = dialog
-        self._probe_confirm_btn = confirm_btn
-
         dialog.show()
 
     def probe_all(self):
@@ -1099,7 +1097,7 @@ class MainWindow(QMainWindow):
 
         # Save reference so we can enable button when clicked
         self._probe_dialog = dialog
-        self._probe_confirm_btn = confirm_btn
+        self.confirm_btn = confirm_btn
 
         dialog.show()
 
