@@ -2,7 +2,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QGraphicsView, QGraphicsScene, QGraphicsTextItem, 
     QGraphicsPixmapItem, QGraphicsRectItem, QSlider, QFileDialog,
-    QLabel, QLineEdit, QDialog, QFormLayout, QDialogButtonBox
+    QLabel, QLineEdit, QDialog, QFormLayout, QDialogButtonBox,
+    QCheckBox, QScrollArea, QGroupBox
 )
 from PySide6.QtGui import QPixmap, QWheelEvent, QBrush, QColor, QPainter, QLinearGradient
 from PySide6.QtCore import Qt, QPointF, QRectF
@@ -66,19 +67,19 @@ class ZoomableGraphicsView(QGraphicsView):
 
 
 class Junction(QGraphicsRectItem):
-    def __init__(self, rectf, resistance, parent_chip, window, gds_coords):
+    def __init__(self, rectf, resistance, parent_chip, window, gds_coords, junction_type=None):
         super().__init__(rectf)
         self.resistance = resistance
         self.window = window
         self.parent_chip = parent_chip
+        self.junction_type = junction_type  # Simplified to use numbers
+        self.text_item = None  # Store reference to associated text
         self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.LeftButton)
         self.gds_coords = gds_coords
 
     def mousePressEvent(self, event):
-        # get reference to main app from scene or item
-
         if getattr(self.window, 'is_assigning_mode', False):
             self.window.selected_junction = self
             self.window.confirm_button.setEnabled(True)
@@ -87,18 +88,28 @@ class Junction(QGraphicsRectItem):
 
 
 class WaferVisualizer(QMainWindow):
-    def __init__(self, chipscene, chip_list,camera):
+    def __init__(self, chipscene, chip_list, camera):
         super().__init__()
         self.chip_list = chip_list
         self.chipscene = chipscene
         self.setWindowTitle("Wafer Chip Visualizer")
-        self.setGeometry(100, 100, 1400, 800)  # Made wider for sidebar
+        self.setGeometry(100, 100, 1600, 800)  # Made even wider for additional controls
         self.camera = camera
+        
         # Heat map variables
         self.heatmap_enabled = False
         self.heatmap_min = 0
         self.heatmap_max = 100
         self.all_junctions = []  # Store all junctions for heat map updates
+        self.all_dies = []  # Store all die graphics items
+        self.die_junction_map = {}  # Map die types to their junctions
+        
+        # Visibility control variables
+        self.visible_die_types = set()  # Set of visible die types
+        self.visible_junction_types = {}  # Dict: die_type -> set of visible junction types
+        
+        # Initialize visibility sets
+        self._initialize_visibility_sets()
 
         # Central widget and layout
         central_widget = QWidget()
@@ -108,35 +119,96 @@ class WaferVisualizer(QMainWindow):
         # QGraphicsScene and View
         self.scene = QGraphicsScene()
         self.view = ZoomableGraphicsView(self.scene)
-        main_layout.addWidget(self.view, stretch=4)
+        main_layout.addWidget(self.view, stretch=3)
 
-        # Sidebar layout
-        sidebar = QVBoxLayout()
-        main_layout.addLayout(sidebar, stretch=1)
+        # Create scrollable sidebar
+        sidebar_scroll = QScrollArea()
+        sidebar_widget = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_scroll.setWidget(sidebar_widget)
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setFixedWidth(350)
+        main_layout.addWidget(sidebar_scroll, stretch=1)
+
+        # Die Visibility Controls
+        self._create_die_visibility_controls(sidebar_layout)
+        
+        # Junction Type Visibility Controls
+        self._create_junction_visibility_controls(sidebar_layout)
 
         # Heat map controls
-        heatmap_label = QLabel("Heat Map Controls")
-        heatmap_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        sidebar.addWidget(heatmap_label)
+        self._create_heatmap_controls(sidebar_layout)
+
+        # Other controls
+        self._create_other_controls(sidebar_layout)
+
+        # Add stretch to push everything to top
+        sidebar_layout.addStretch()
+
+        # Initialize legend
+        self.update_legend()
+        
+        self.wafer_populate()
+        self.show()
+
+    def _initialize_visibility_sets(self):
+        """Initialize visibility sets with all die types visible by default"""
+        for index in range(self.chip_list.count()):
+            category = self.chip_list.item(index)
+            self.visible_die_types.add(category.id)
+            self.visible_junction_types[category.id] = set()  # Will be populated later
+
+    def _create_die_visibility_controls(self, layout):
+        """Create die visibility checkbox controls"""
+        die_group = QGroupBox("Die Visibility")
+        die_layout = QVBoxLayout(die_group)
+        
+        self.die_checkboxes = {}
+        
+        for index in range(self.chip_list.count()):
+            category = self.chip_list.item(index)
+            checkbox = QCheckBox(f"Die Type: {category.id}")
+            checkbox.setChecked(True)  # All visible by default
+            checkbox.stateChanged.connect(lambda state, die_type=category.id: self._on_die_visibility_changed(die_type, state))
+            
+            self.die_checkboxes[category.id] = checkbox
+            die_layout.addWidget(checkbox)
+        
+        layout.addWidget(die_group)
+
+    def _create_junction_visibility_controls(self, layout):
+        """Create junction type visibility checkbox controls"""
+        self.junction_group = QGroupBox("Junction Type Visibility")
+        self.junction_layout = QVBoxLayout(self.junction_group)
+        
+        # This will be populated after junctions are loaded
+        self.junction_checkboxes = {}  # die_type -> {junction_type -> checkbox}
+        
+        layout.addWidget(self.junction_group)
+
+    def _create_heatmap_controls(self, layout):
+        """Create heat map control widgets"""
+        heatmap_group = QGroupBox("Heat Map Controls")
+        heatmap_layout = QVBoxLayout(heatmap_group)
 
         # Toggle heat map button
         self.showheatmap = QPushButton("Show Heat Map")
         self.showheatmap.clicked.connect(self.toggle_heatmap)
-        sidebar.addWidget(self.showheatmap)
+        heatmap_layout.addWidget(self.showheatmap)
 
         # Heat map adjustment buttons
         self.auto_scale_btn = QPushButton("Auto Scale")
         self.auto_scale_btn.clicked.connect(self.auto_scale_heatmap)
-        sidebar.addWidget(self.auto_scale_btn)
+        heatmap_layout.addWidget(self.auto_scale_btn)
 
         self.set_minmax_btn = QPushButton("Set Min/Max")
         self.set_minmax_btn.clicked.connect(self.set_minmax_dialog)
-        sidebar.addWidget(self.set_minmax_btn)
+        heatmap_layout.addWidget(self.set_minmax_btn)
 
         # Heat map legend
         legend_label = QLabel("Heat Map Legend")
-        legend_label.setStyleSheet("font-weight: bold; margin-top: 20px;")
-        sidebar.addWidget(legend_label)
+        legend_label.setStyleSheet("font-weight: bold;")
+        heatmap_layout.addWidget(legend_label)
 
         # Create heat map gradient view
         self.legend_scene = QGraphicsScene()
@@ -144,31 +216,120 @@ class WaferVisualizer(QMainWindow):
         self.legend_view.setFixedHeight(100)
         self.legend_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.legend_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sidebar.addWidget(self.legend_view)
+        heatmap_layout.addWidget(self.legend_view)
 
         # Min/Max value labels
         self.max_label = QLabel(f"Max: {self.heatmap_max}")
         self.min_label = QLabel(f"Min: {self.heatmap_min}")
-        sidebar.addWidget(self.max_label)
-        sidebar.addWidget(self.min_label)
+        heatmap_layout.addWidget(self.max_label)
+        heatmap_layout.addWidget(self.min_label)
 
-        # Other controls
-        controls_label = QLabel("Other Controls")
-        controls_label.setStyleSheet("font-weight: bold; margin-top: 20px;")
-        sidebar.addWidget(controls_label)
+        layout.addWidget(heatmap_group)
+
+    def _create_other_controls(self, layout):
+        """Create other control widgets"""
+        other_group = QGroupBox("Other Controls")
+        other_layout = QVBoxLayout(other_group)
 
         # Reprobe button
         self.reprobe_btn = QPushButton("Reprobe Junction")
-        sidebar.addWidget(self.reprobe_btn)
+        self.reprobe_btn.clicked.connect(self.probe_single_junction)
+        other_layout.addWidget(self.reprobe_btn)
 
-        # Add stretch to push everything to top
-        sidebar.addStretch()
+        layout.addWidget(other_group)
 
-        # Initialize legend
-        self.update_legend()
+    def _on_die_visibility_changed(self, die_type, state):
+        """Handle die visibility checkbox changes - only affects junctions, not die rectangles"""
+        is_checked = state == Qt.CheckState.Checked.value
         
-        self.wafer_populate()
-        self.show()
+        if is_checked:
+            self.visible_die_types.add(die_type)
+        else:
+            self.visible_die_types.discard(die_type)
+        
+        self._update_scene_visibility()
+
+    def _on_junction_visibility_changed(self, die_type, junction_type, state):
+        """Handle junction visibility checkbox changes"""
+        is_checked = state == Qt.CheckState.Checked.value
+        
+        if die_type not in self.visible_junction_types:
+            self.visible_junction_types[die_type] = set()
+        
+        if is_checked:
+            self.visible_junction_types[die_type].add(junction_type)
+        else:
+            self.visible_junction_types[die_type].discard(junction_type)
+        
+        self._update_scene_visibility()
+
+    def _update_junction_visibility_controls(self):
+        """Update junction visibility controls based on loaded junctions"""
+        # Clear existing junction controls
+        for i in reversed(range(self.junction_layout.count())):
+            child = self.junction_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        self.junction_checkboxes = {}
+        
+        # Group junctions by die type and junction type
+        die_junction_types = {}
+        for junction in self.all_junctions:
+            die_type = junction.parent_chip.chip_type
+            junction_type = junction.junction_type or "Unknown"
+            
+            if die_type not in die_junction_types:
+                die_junction_types[die_type] = set()
+            die_junction_types[die_type].add(junction_type)
+        
+        # Create checkboxes for each die type and its junction types
+        for die_type, junction_types in die_junction_types.items():
+            if die_type not in self.junction_checkboxes:
+                self.junction_checkboxes[die_type] = {}
+            
+            # Add die type label
+            die_label = QLabel(f"Die Type: {die_type}")
+            die_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+            self.junction_layout.addWidget(die_label)
+            
+            # Add checkboxes for each junction type
+            for junction_type in sorted(junction_types):
+                checkbox = QCheckBox(f"  {junction_type}")
+                checkbox.setChecked(True)  # All visible by default
+                checkbox.stateChanged.connect(
+                    lambda state, dt=die_type, jt=junction_type: 
+                    self._on_junction_visibility_changed(dt, jt, state)
+                )
+                
+                self.junction_checkboxes[die_type][junction_type] = checkbox
+                self.junction_layout.addWidget(checkbox)
+                
+                # Initialize visibility set
+                if die_type not in self.visible_junction_types:
+                    self.visible_junction_types[die_type] = set()
+                self.visible_junction_types[die_type].add(junction_type)
+
+    def _update_scene_visibility(self):
+        """Update visibility of junctions and text based on current settings"""
+        # Dies are always visible - we don't hide them anymore
+        
+        # Update junction visibility
+        for junction in self.all_junctions:
+            die_type = junction.parent_chip.chip_type
+            junction_type = junction.junction_type or "Unknown"
+            
+            # Junction is visible if both die type and junction type are selected
+            die_visible = die_type in self.visible_die_types
+            junction_visible = (die_type in self.visible_junction_types and 
+                              junction_type in self.visible_junction_types[die_type])
+            
+            should_be_visible = die_visible and junction_visible
+            junction.setVisible(should_be_visible)
+            
+            # Also hide/show the associated text
+            if junction.text_item is not None:
+                junction.text_item.setVisible(should_be_visible)
 
     def resistance_to_color(self, resistance):
         """Convert resistance value to color based on heat map range"""
@@ -295,6 +456,7 @@ class WaferVisualizer(QMainWindow):
                                     chip_item.rect().width() * scale_factor,
                                     chip_item.rect().height() * scale_factor)
         new_chip.setBrush(QColor(192,192,192))
+        new_chip.chip_type = chip_item.chip_type  # Store chip type for visibility control
         
         # Use the top-left of the scene bounding rect
         scaled_x = scene_rect.x() * scale_factor
@@ -308,13 +470,18 @@ class WaferVisualizer(QMainWindow):
         for item in scene.items():
             new_chip = self.duplicate_and_scale_chip(item, 10)
             self.scene.addItem(new_chip)
+            self.all_dies.append(new_chip)  # Store for visibility control
+            
             for index in range(self.chip_list.count()):
                 category = self.chip_list.item(index)
                 if category.id == item.chip_type:
                     if category.gds_path != None and category.gds_path != "None":
-                        self.load_gds(category.gds_path, new_chip.pos(),item, item.probe_info)
+                        self.load_gds(category.gds_path, new_chip.pos(), item, item.probe_info)
+        
+        # Update junction visibility controls after all junctions are loaded
+        self._update_junction_visibility_controls()
 
-    def load_gds(self, gds_path, center_offset,parent_chip, resistance_map=None, target_layer=50):
+    def load_gds(self, gds_path, center_offset, parent_chip, resistance_map=None, target_layer=50):
         lib = gdspy.GdsLibrary(infile=gds_path)
         cell = lib.top_level()[0]
         if isinstance(center_offset, QPointF):
@@ -328,7 +495,7 @@ class WaferVisualizer(QMainWindow):
             if layer != target_layer:
                 continue  # skip other layers
 
-            for points in polygons:
+            for i, points in enumerate(polygons):
                 if len(points) != 4:
                     continue  # skip non-rectangles
 
@@ -343,8 +510,27 @@ class WaferVisualizer(QMainWindow):
                 w = max(x_coords) - x
                 h = max(y_coords) - y
                 
-                # Create junction with rectangle geometry only (no position in constructor)
-                junction = Junction(QRectF(0, 0, w/10, h/10), None, parent_chip=parent_chip, window=self, gds_coords=centroid)
+                # Get junction type from resistance_map (4th row)
+                junction_type = None
+                if resistance_map is not None and resistance_map.shape[0] > 3:
+                    # Use tolerance-based matching to find junction type
+                    tolerance = 1e-6
+                    distances = np.sqrt((resistance_map[0] - centroid[0])**2 + 
+                                      (resistance_map[1] - centroid[1])**2)
+                    min_distance_idx = np.argmin(distances)
+                    if distances[min_distance_idx] < tolerance:
+                        junction_type = resistance_map[3, min_distance_idx]
+                        if isinstance(junction_type, (np.bytes_, bytes)):
+                            junction_type = junction_type.decode('utf-8')
+                        elif isinstance(junction_type, np.ndarray):
+                            junction_type = str(junction_type.item())
+                        else:
+                            junction_type = str(junction_type)
+                
+                # Create junction with numerical junction type
+                junction = Junction(QRectF(0, 0, w/10, h/10), None, 
+                                  parent_chip=parent_chip, window=self, 
+                                  gds_coords=centroid, junction_type=junction_type)
                 junction.setBrush(QBrush(QColor(180, 240, 200)))
                 
                 # Set position using setPos for proper scene positioning
@@ -353,7 +539,7 @@ class WaferVisualizer(QMainWindow):
                 junction.setPos(junction_x, junction_y)
                 
                 self.scene.addItem(junction)
-                self.all_junctions.append(junction)  # Store for heat map
+                self.all_junctions.append(junction)  # Store for heat map and visibility
 
                 if resistance_map is not None and resistance_map.size > 0:
                     # Use tolerance-based matching instead of exact equality
@@ -399,6 +585,8 @@ class WaferVisualizer(QMainWindow):
                         text_item.setPos(junction_center_x + text_offset_x, 
                                     junction_center_y + text_offset_y)
                         
+                        # Store reference to text in junction and add to scene
+                        junction.text_item = text_item
                         self.scene.addItem(text_item)
                     else:
                         # Optionally add a "No data" label
@@ -410,6 +598,9 @@ class WaferVisualizer(QMainWindow):
                         junction_center_y = junction_y + (h/10) / 2
                         
                         text_item.setPos(junction_center_x - 15, junction_center_y - 10)
+                        
+                        # Store reference to text in junction and add to scene
+                        junction.text_item = text_item
                         self.scene.addItem(text_item)
 
     def probe_single_junction(self):
@@ -420,16 +611,16 @@ class WaferVisualizer(QMainWindow):
         info = QLabel("Click on Junction to reprobe")
         layout.addWidget(info)
 
-        self.confirm_btn = QPushButton("Confirm")
-        self.confirm_btn.setEnabled(False)  # only enable after selection
-        layout.addWidget(self.confirm_btn)
+        self.confirm_button = QPushButton("Confirm")
+        self.confirm_button.setEnabled(False)  # only enable after selection
+        layout.addWidget(self.confirm_button)
 
         # Flag to enable chip selection mode
         self.is_assigning_mode = True
         self.selected_junction = None
+        
         def confirm_selection():
             dialog.accept()
-
             self.is_assigning_mode = False
             die = self.selected_junction.parent_chip
             size = die.irl_size
@@ -437,20 +628,10 @@ class WaferVisualizer(QMainWindow):
             probe_path = die.gds_coords
 
             center = die.irl_coordinates
-            self.camera.plot_die(die_size_mm = size, 
-                                 points_to_probe = probe_path, 
-                                 die_center = center, 
-                                 die_object = die)
-        self.confirm_btn.clicked.connect(confirm_selection)
-        dialog.show()
-
-
-
-
-        self.confirm_btn.clicked.connect(confirm_selection)
-
-        # Save reference so we can enable button when clicked
-        self._probe_dialog = dialog
+            self.camera.plot_die(die_size_mm=size, 
+                               points_to_probe=probe_path, 
+                               die_center=center, 
+                               die_object=die)
         
-
+        self.confirm_button.clicked.connect(confirm_selection)
         dialog.show()

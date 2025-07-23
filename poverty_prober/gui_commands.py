@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import QDialog, QGraphicsTextItem, QPushButton, QVBoxLayout,QLabel,QLineEdit, QInputDialog, QListWidgetItem, QFileDialog, QToolTip, QMainWindow, QMessageBox, QGraphicsView, QGraphicsScene, QGraphicsRectItem 
+from PySide6.QtWidgets import QWidget, QDialog,QHBoxLayout, QGraphicsTextItem, QFrame, QCheckBox, QPushButton, QVBoxLayout,QLabel,QLineEdit, QInputDialog, QListWidgetItem, QFileDialog, QToolTip, QMainWindow, QMessageBox, QGraphicsView, QGraphicsScene, QGraphicsRectItem 
 from .probeGUI import Ui_MainWindow
 from .probing_stuff import probe_handler
 from .camera_stuff import camera_handler
-from PySide6.QtGui import QBrush, QColor, QCursor
+from PySide6.QtGui import QBrush, QColor, QCursor, QPen
 from PySide6.QtCore import QRectF, Qt
 import numpy as np
 import gdspy
@@ -37,33 +37,120 @@ colornames =  [
 highest_id = 0
 
 class ChipViewer(QDialog):
-    def __init__(self, gds_path, chipname, rowcol, resistance_map=None, ):
+    def __init__(self, gds_path, chipname, rowcol, resistance_map=None):
         super().__init__()
         self.setWindowTitle(f"Chip Resistance Viewer: {chipname}, row: {rowcol[0,0]} col: {rowcol[1,0]}")
-        layout = QVBoxLayout(self)
-
-        # Setup scene and view
+        self.gds_path = gds_path
+        self.resistance_map = resistance_map
+        
+        # Main layout
+        main_layout = QHBoxLayout(self)
+        
+        # Left panel for controls
+        control_panel = QWidget()
+        control_layout = QVBoxLayout(control_panel)
+        control_panel.setFixedWidth(200)
+        
+        # Layer selection label
+        layer_label = QLabel("Select Layers to Display:")
+        control_layout.addWidget(layer_label)
+        
+        # Container for layer checkboxes
+        self.checkbox_container = QWidget()
+        self.checkbox_layout = QVBoxLayout(self.checkbox_container)
+        control_layout.addWidget(self.checkbox_container)
+        
+        # Refresh button
+        refresh_btn = QPushButton("Refresh Display")
+        refresh_btn.clicked.connect(self.refresh_display)
+        control_layout.addWidget(refresh_btn)
+        
+        # Add stretch to push everything to top
+        control_layout.addStretch()
+        
+        main_layout.addWidget(control_panel)
+        
+        # Right panel for graphics view
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
-        layout.addWidget(self.view)
-
-        # Load GDS and draw
-        self.load_gds(gds_path, resistance_map)
-
-        self.resize(800, 600)
+        main_layout.addWidget(self.view)
+        
+        # Store checkboxes
+        self.layer_checkboxes = {}
+        
+        # Initialize
+        self.discover_layers()
+        self.load_gds()
+        
+        self.resize(1000, 600)
         self.show()
 
-    def load_gds(self, gds_path, resistance_map=None, target_layer=50):
-        lib = gdspy.GdsLibrary(infile=gds_path)
+    def discover_layers(self):
+        """Discover all layers 50 and above in the GDS file"""
+        lib = gdspy.GdsLibrary(infile=self.gds_path)
         cell = lib.top_level()[0]
+        
+        # Get all layer specs
+        poly_dict = cell.get_polygons(by_spec=True)
+        
+        # Find layers 50 and above
+        available_layers = set()
+        for (layer, datatype), polygons in poly_dict.items():
+            if layer >= 50 and len(polygons) > 0:
+                available_layers.add(layer)
+        
+        # Create checkboxes for each available layer
+        for layer in sorted(available_layers):
+            checkbox = QCheckBox(f"Junction Type {layer - 50}")
+            checkbox.setChecked(True)  # All checked by default
+            self.layer_checkboxes[layer] = checkbox
+            self.checkbox_layout.addWidget(checkbox)
 
+    def get_selected_layers(self):
+        """Return set of currently selected layers"""
+        return {layer for layer, checkbox in self.layer_checkboxes.items() 
+                if checkbox.isChecked()}
+
+    def refresh_display(self):
+        """Refresh the display with currently selected layers"""
+        self.scene.clear()
+        self.load_gds()
+
+    def load_gds(self):
+        """Load and display GDS with selected layers only"""
+        lib = gdspy.GdsLibrary(infile=self.gds_path)
+        cell = lib.top_level()[0]
+        
+        # Get selected layers
+        selected_layers = self.get_selected_layers()
+        
+        if not selected_layers:
+            return  # Nothing to display
+        
         # Group polygons by (layer, datatype)
         poly_dict = cell.get_polygons(by_spec=True)
-
+        
+        # Set background
+        self.scene.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
+        
+        # Color palette for different layers
+        layer_colors = [
+            QColor(180, 240, 200),  # Light green
+            QColor(200, 180, 240),  # Light purple
+            QColor(240, 200, 180),  # Light orange
+            QColor(180, 200, 240),  # Light blue
+            QColor(240, 240, 180),  # Light yellow
+            QColor(240, 180, 200),  # Light pink
+        ]
+        
         for (layer, datatype), polygons in poly_dict.items():
-            if layer != target_layer:
-                continue  # skip other layers
-
+            if layer not in selected_layers:
+                continue  # Skip unselected layers
+            
+            # Choose color based on layer
+            color_idx = (layer - 50) % len(layer_colors)
+            layer_color = layer_colors[color_idx]
+            
             for points in polygons:
                 if len(points) != 4:
                     continue  # skip non-rectangles
@@ -71,35 +158,38 @@ class ChipViewer(QDialog):
                 # Bounding box
                 x_coords = points[:, 0]
                 y_coords = points[:, 1]
-
-                centroid = np.mean(points, axis=0)/1000
+                
+                centroid = np.mean(points, axis=0) / 1000
 
                 x = min(x_coords)
                 y = min(y_coords)
                 w = max(x_coords) - x
                 h = max(y_coords) - y
-                self.scene.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
+                
                 rect_item = QGraphicsRectItem(QRectF(x/7, (-y - h)/7, w/7, h/7))
-                rect_item.setBrush(QBrush(QColor(180, 240, 200)))
+                rect_item.setBrush(QBrush(layer_color))
+                
+                # Add border to distinguish layers
+                pen = QPen(QColor(100, 100, 100))
+                pen.setWidth(1)
+                rect_item.setPen(pen)
+                
                 self.scene.addItem(rect_item)
 
-                if resistance_map is not None and resistance_map.size > 0:
-                    # Debug: Print what we're looking for
-                    
+                if self.resistance_map is not None and self.resistance_map.size > 0:
                     # Use tolerance-based matching instead of exact equality
                     tolerance = 1e-6  # Adjust this value as needed
                     
                     # Calculate distances to all points in resistance_map
-                    distances = np.sqrt((resistance_map[0] - centroid[0])**2 + 
-                                      (resistance_map[1] - centroid[1])**2)
+                    distances = np.sqrt((self.resistance_map[0] - centroid[0])**2 + 
+                                      (self.resistance_map[1] - centroid[1])**2)
                     
                     # Find the closest match
                     min_distance_idx = np.argmin(distances)
                     min_distance = distances[min_distance_idx]
                     
-                    
                     if min_distance < tolerance:
-                        resistance = resistance_map[2, min_distance_idx]
+                        resistance = self.resistance_map[2, min_distance_idx]
                         
                         # Format resistance value
                         if resistance < 1000:
@@ -113,7 +203,7 @@ class ChipViewer(QDialog):
                         else:
                             resistance_display = resistance / 1000000
                             resistance_rounded = math.trunc(resistance_display * 100) / 100
-                            text_item = QGraphicsTextItem(f"{resistance_rounded}MΩ")  # Fixed: should be MΩ, not kΩ
+                            text_item = QGraphicsTextItem(f"{resistance_rounded}MΩ")
                         
                         text_item.setDefaultTextColor(QColor("black"))
                         text_item.setPos((x + w / 2)/7 - 18, (-y - h / 2)/7)
@@ -139,24 +229,43 @@ class wafer_chip_type(QListWidgetItem):
     def generate_points_to_probe(self):
         self.points_to_probe = []
         gdsii = gdspy.GdsLibrary(infile=self.gds_path)
-        target_layer = 50
         target_datatype = 0
+        
+        print(f"GDS file: {self.gds_path}")
+        print(f"GDS units: {gdsii.unit}")  # Check the unit
+        
+        # Initialize empty array with proper shape
+        self.points_to_probe = np.empty((3, 0))
         
         for cell_name in gdsii.cells:
             cell = gdsii.cells[cell_name]
+            print(f"Processing cell: {cell_name}")
             
-            polygons = cell.get_polygons(by_spec=(target_layer, target_datatype))
-            self.points_to_probe = np.array([[],[]])
-            
-            for polygon in polygons:
-                if len(polygon) == 4:
-                    x_center = polygon[:, 0].mean()
-                    y_center = polygon[:, 1].mean()
-                    temp_center = np.array([[x_center],[y_center]])
-                    self.points_to_probe = np.hstack((self.points_to_probe, temp_center))
-
-            return
-
+            # Start from layer 50 and go up until no polygons found
+            layer = 50
+            while True:
+                layer_index = layer - 50
+                polygons = cell.get_polygons(by_spec=(layer, target_datatype))
+                
+                if len(polygons) == 0:
+                    break
+                
+                print(f"Layer {layer}: found {len(polygons)} polygons")
+                
+                for i, polygon in enumerate(polygons):
+                    if len(polygon) == 4:
+                        print(f"  Polygon {i}: {polygon}")
+                        x_center = polygon[:, 0].mean()
+                        y_center = polygon[:, 1].mean()
+                        print(f"  Center: ({x_center}, {y_center})")
+                        temp_center = np.array([[x_center], [y_center], [layer_index]])
+                        self.points_to_probe = np.hstack((self.points_to_probe, temp_center))
+                
+                layer += 1
+        
+        print(f"Final points_to_probe: {self.points_to_probe}")
+        return
+        
 class wafer_chip(QGraphicsRectItem):
     def __init__(self, x, y, size, chip_type, irl_size, main_window, rowcol):
         super().__init__(x, y, size, size)
@@ -181,11 +290,12 @@ class wafer_chip(QGraphicsRectItem):
             category = self.main_window.ui.listWidget.item(index)
             if category.id == self.chip_type:
                 if category.points_to_probe.size >0:
-                    probe_path = category.points_to_probe
-                    probe_path = probe_path/1000
-                    self.probe_info = np.zeros((3,probe_path.shape[1]))
-                    self.probe_info[:3,:] = -1
-                    self.probe_info[:2,:] = probe_path
+                    probe_path = category.points_to_probe.copy()
+                    probe_path[:2,:] = probe_path[:2,:]/1000
+                    self.probe_info = np.zeros((4, probe_path.shape[1]))
+                    self.probe_info[:2,:] = probe_path[:2,:]
+                    self.probe_info[2,:] = -1
+                    self.probe_info[3,:] = probe_path[2,:]
 
     def insert_probed_resistance(self, coord, resistance):
         
@@ -212,7 +322,8 @@ class wafer_chip(QGraphicsRectItem):
 
         elif getattr(self.main_window, 'is_probing_mode', False):
             self.main_window.selected_chip = self
-            self.main_window._probe_confirm_btn.setEnabled(True)
+            self.main_window._on_chip_selected()
+            self.main_window.confirm_btn.setEnabled(True)
 
 
         else:
@@ -532,7 +643,7 @@ class MainWindow(QMainWindow):
                 chip.set_irl_coords((offset - rowcenter)/32 * irlsize, ((len(list)-1)/2.0 - row) * irlsize)
                 scene.addItem(chip)
 
-                print(chip.pos())
+                # print(chip.pos())
                 offset = offset + 32
 
         self.ui.graphicsView.setScene(scene)
@@ -731,6 +842,16 @@ class MainWindow(QMainWindow):
         info = QLabel("Click a chip on the wafer to probe.")
         layout.addWidget(info)
 
+        # Container for checkboxes (will be populated after chip selection)
+        checkbox_frame = QFrame()
+        checkbox_layout = QVBoxLayout(checkbox_frame)
+        checkbox_label = QLabel("Select layers to probe:")
+        checkbox_layout.addWidget(checkbox_label)
+        layout.addWidget(checkbox_frame)
+        
+        # Initially hide the checkbox frame
+        checkbox_frame.hide()
+
         confirm_btn = QPushButton("Confirm")
         confirm_btn.setEnabled(False)  # only enable after selection
         layout.addWidget(confirm_btn)
@@ -738,26 +859,95 @@ class MainWindow(QMainWindow):
         # Flag to enable chip selection mode
         self.is_probing_mode = True
         self.selected_chip = None
+        self.layer_checkboxes = {}  # Store checkboxes by layer index
         
-        def confirm_selection():
-            dialog.accept()
-
-            self.is_probing_mode = False
-
+        def populate_layer_checkboxes():
+            """Populate checkboxes based on available layers in selected chip type"""
+            if self.selected_chip is None:
+                return
+                
             chip_type = self.selected_chip.chip_type
-
+            
+            # Find the matching category and get probe_path
+            probe_path = None
             for index in range(self.ui.listWidget.count()):
                 category = self.ui.listWidget.item(index)
                 if category.id == chip_type:
                     probe_path = category.points_to_probe
-                    probe_path = probe_path/1000
+                    print(f"raw probe path{probe_path}")
+                    break
+            
+            if probe_path is None or probe_path.shape[0] < 3:
+                return
+                
+            # Get unique layer indices from row 2 (0-indexed)
+            unique_layers = np.unique(probe_path[2, :]).astype(int)
+            
+            # Clear existing checkboxes
+            for checkbox in self.layer_checkboxes.values():
+                checkbox.deleteLater()
+            self.layer_checkboxes.clear()
+            
+            # Create checkboxes for each layer
+            for layer_idx in sorted(unique_layers):
+                layer_num = layer_idx + 50  # Convert back to actual layer number
+                checkbox = QCheckBox(f"Layer {layer_num} (Index {layer_idx})")
+                checkbox.setChecked(True)  # All checked by default
+                self.layer_checkboxes[layer_idx] = checkbox
+                checkbox_layout.addWidget(checkbox)
+            
+            # Show the checkbox frame
+            checkbox_frame.show()
+            dialog.adjustSize()  # Resize dialog to fit new content
 
-            size = self.selected_chip.irl_size
-            center = self.selected_chip.irl_coordinates
-            self.camera.plot_die(die_size_mm=size, 
-                                points_to_probe=self.sort_probe_path(probe_path),
-                                die_center=center,
-                                die_object = self.selected_chip)
+        def confirm_selection():
+            dialog.accept()
+            self.is_probing_mode = False
+
+            chip_type = self.selected_chip.chip_type
+
+            # Get the full probe_path
+            probe_path = None
+            for index in range(self.ui.listWidget.count()):
+                category = self.ui.listWidget.item(index)
+                if category.id == chip_type:
+                    probe_path = category.points_to_probe
+                    print(f"Raw probe_path from category: {probe_path}")
+                    break
+            
+            if probe_path is not None:
+                # Filter probe_path based on selected checkboxes
+                selected_layers = {layer_idx for layer_idx, checkbox in self.layer_checkboxes.items() 
+                                if checkbox.isChecked()}
+                
+                if selected_layers:
+                    # Create mask for selected layers
+                    layer_mask = np.isin(probe_path[2, :], list(selected_layers))
+                    filtered_probe_path = probe_path[:, layer_mask]
+                    print(f"After filtering: {filtered_probe_path}")
+                else:
+                    # If no layers selected, use empty array
+                    filtered_probe_path = np.empty((probe_path.shape[0], 0))
+                
+                sorted_path = self.sort_probe_path(filtered_probe_path)
+                print(f"After sorting: {sorted_path}")
+                sorted_path = sorted_path/1000
+                size = self.selected_chip.irl_size
+                center = self.selected_chip.irl_coordinates
+                self.camera.plot_die(die_size_mm=size, 
+                                    points_to_probe=sorted_path,
+                                    die_center=center,
+                                    die_object=self.selected_chip)
+        # Override the chip selection to populate checkboxes
+        original_chip_selected = getattr(self, '_on_chip_selected', None)
+        
+        def on_chip_selected():
+            if original_chip_selected:
+                original_chip_selected()
+            populate_layer_checkboxes()
+            confirm_btn.setEnabled(True)
+        
+        self._on_chip_selected = on_chip_selected
 
         confirm_btn.clicked.connect(confirm_selection)
 
