@@ -483,6 +483,9 @@ class WaferVisualizer(QMainWindow):
 
     def load_gds(self, gds_path, center_offset, parent_chip, resistance_map=None, target_layer=50):
         lib = gdspy.GdsLibrary(infile=gds_path)
+        top_level_cells = lib.top_level()
+        print(f"Number of top-level cells: {len(top_level_cells)}")
+
         cell = lib.top_level()[0]
         if isinstance(center_offset, QPointF):
             dx = center_offset.x() + 150
@@ -492,7 +495,7 @@ class WaferVisualizer(QMainWindow):
         poly_dict = cell.get_polygons(by_spec=True)
 
         for (layer, datatype), polygons in poly_dict.items():
-            if layer != target_layer:
+            if layer < target_layer:
                 continue  # skip other layers
 
             for i, points in enumerate(polygons):

@@ -960,33 +960,98 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("Select a Chip type to probe")
         layout = QVBoxLayout(dialog)
         self.selected_type = None
+        
         info = QLabel("Click a chip type to probe.")
         layout.addWidget(info)
+
+        # Container for checkboxes (will be populated after chip type selection)
+        checkbox_frame = QFrame()
+        checkbox_layout = QVBoxLayout(checkbox_frame)
+        checkbox_label = QLabel("Select types to probe:")
+        checkbox_layout.addWidget(checkbox_label)
+        layout.addWidget(checkbox_frame)
+        
+        # Initially hide the checkbox frame
+        checkbox_frame.hide()
 
         confirm_btn = QPushButton("Confirm")
         confirm_btn.setEnabled(False)  # only enable after selection
         layout.addWidget(confirm_btn)
 
+        self.type_checkboxes = {}  # Store checkboxes by type index
+
+        def populate_type_checkboxes():
+            """Populate checkboxes based on available types in selected chip category"""
+            if self.selected_type is None:
+                return
+                
+            probe_path = self.selected_type.points_to_probe
+            print(f"raw probe path: {probe_path}")
+            
+            if probe_path is None or probe_path.shape[0] < 3:
+                return
+                
+            # Get unique type indices from row 3 (0-indexed)
+            unique_types = np.unique(probe_path[2, :]).astype(int)
+            
+            # Clear existing checkboxes
+            for checkbox in self.type_checkboxes.values():
+                checkbox.deleteLater()
+            self.type_checkboxes.clear()
+            
+            # Create checkboxes for each type
+            for type_idx in sorted(unique_types):
+                checkbox = QCheckBox(f"Type {type_idx}")
+                checkbox.setChecked(True)  # All checked by default
+                self.type_checkboxes[type_idx] = checkbox
+                checkbox_layout.addWidget(checkbox)
+            
+            # Show the checkbox frame
+            checkbox_frame.show()
+            dialog.adjustSize()  # Resize dialog to fit new content
+
         def on_chip_selected(item):
             self.selected_type = item  # Assume `item` is a custom QListWidgetItem with `chip_type`, etc.
+            populate_type_checkboxes()
             confirm_btn.setEnabled(True)
 
         def confirm_selection():
             dialog.accept()
+            
+            # Get the full probe_path
             probe_path = self.selected_type.points_to_probe
-            probe_path = probe_path / 1000
+            
+            if probe_path is not None:
+                # Filter probe_path based on selected checkboxes
+                selected_types = {type_idx for type_idx, checkbox in self.type_checkboxes.items() 
+                                if checkbox.isChecked()}
+                
+                if selected_types:
+                    # Create mask for selected types
+                    type_mask = np.isin(probe_path[2, :], list(selected_types))
+                    filtered_probe_path = probe_path[:, type_mask]
+                    print(f"After filtering: {filtered_probe_path}")
+                else:
+                    # If no types selected, use empty array
+                    filtered_probe_path = np.empty((probe_path.shape[0], 0))
+                
+                # Scale the coordinates
+                filtered_probe_path[:2,:] = filtered_probe_path[:2,:] / 1000
 
-            for item in self.ui.graphicsView.scene().items():
-                if isinstance(item, wafer_chip):
-                    if item.chip_type == self.selected_type.id:
-                        size = item.irl_size
-                        center = item.irl_coordinates
-                        self.camera.plot_die(
-                            die_size_mm=size,
-                            points_to_probe=self.sort_probe_path(probe_path),
-                            die_center=center,
-                            die_object = item
-                        )
+                for item in self.ui.graphicsView.scene().items():
+                    if isinstance(item, wafer_chip):
+                        if item.chip_type == self.selected_type.id:
+                            size = item.irl_size
+                            center = item.irl_coordinates
+                            tylerthecreator = self.camera.plot_die(
+                                die_size_mm=size,
+                                points_to_probe=self.sort_probe_path(filtered_probe_path),
+                                die_center=center,
+                                die_object=item
+                            )
+
+                            if tylerthecreator == 'bork':
+                                break
 
         # Connect the list widget click
         self.ui.listWidget.itemClicked.connect(on_chip_selected)
@@ -996,7 +1061,6 @@ class MainWindow(QMainWindow):
         self._probe_confirm_btn = confirm_btn
 
         dialog.show()  # Use exec_() instead of show() to block until closed
-
 
 
     def sort_probe_path(self, array):
@@ -1079,6 +1143,11 @@ class MainWindow(QMainWindow):
         self.is_probing_mode = True
         self.selected_chip = None
         
+        def on_chip_selected():
+            confirm_btn.setEnabled(True)
+
+        self._on_chip_selected = on_chip_selected
+
         def confirm_selection():
             dialog.accept()
 
@@ -1095,6 +1164,7 @@ class MainWindow(QMainWindow):
 
         confirm_btn.clicked.connect(confirm_selection)
 
+        self.confirm_btn = confirm_btn
         # Save reference so we can enable button when clicked
         self._probe_dialog = dialog
         self.confirm_btn = confirm_btn

@@ -397,11 +397,77 @@ class camera_handler():
         self.alignment_mode = False        
 
 
+    
     def apply_transformation(self):
-
         if self.align1_center is not None and self.align2_center is not None:
+            # Ask if user wants visual confirmation
             self.prober.apply_transformation(self.align1_center, self.align2_center, self.align1_real, self.align2_real, self.z1, self.z2)
             self.aligned = True
+
+            visual_confirm_msg = QMessageBox()
+            visual_confirm_msg.setWindowTitle("Visual Confirmation")
+            visual_confirm_msg.setText("Do you want to visually confirm alignment by moving to both alignment marks?")
+            visual_confirm_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            visual_confirm_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+            
+            visual_response = visual_confirm_msg.exec()
+            
+            if visual_response == QMessageBox.StandardButton.Yes:
+                # Move to first alignment mark
+                # Add your actual movement code here, e.g.:
+                # self.prober.move_to_position(self.align1_real[0], self.align1_real[1], self.z1)
+                
+                self.prober.transformed_move(self.align1_real, True)
+                # Confirm first alignment mark
+                self.update_camera()
+                cv2.waitKey(1)
+                confirm1_msg = QMessageBox()
+                confirm1_msg.setWindowTitle("Confirm Alignment Mark 1")
+                confirm1_msg.setText("The probe should now be at alignment mark 1. Does the position look correct?")
+                confirm1_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                confirm1_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                
+                confirm1_response = confirm1_msg.exec()
+                
+                if confirm1_response == QMessageBox.StandardButton.No:
+                    error_msg = QMessageBox()
+                    error_msg.setWindowTitle("Alignment Error")
+                    error_msg.setText("Alignment mark 1 position is incorrect. Please re-set alignment marks and try again.")
+                    error_msg.exec()
+                    return
+                
+                self.prober.transformed_move(self.align2_real, True)
+                # Confirm first alignment mark
+                self.update_camera()
+                # Confirm second alignment mark
+                confirm2_msg = QMessageBox()
+                confirm2_msg.setWindowTitle("Confirm Alignment Mark 2")
+                confirm2_msg.setText("The probe should now be at alignment mark 2. Does the position look correct?")
+                confirm2_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                confirm2_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                
+                confirm2_response = confirm2_msg.exec()
+                
+                if confirm2_response == QMessageBox.StandardButton.No:
+                    error_msg = QMessageBox()
+                    error_msg.setWindowTitle("Alignment Error")
+                    error_msg.setText("Alignment mark 2 position is incorrect. Please re-set alignment marks and try again.")
+                    error_msg.exec()
+                    return
+                
+                # Both confirmations passed
+                success_msg = QMessageBox()
+                success_msg.setWindowTitle("Visual Confirmation Complete")
+                success_msg.setText("Both alignment marks confirmed. Proceeding with transformation.")
+                success_msg.exec()
+            
+            # Proceed with original transformation
+            
+            final_msg = QMessageBox()
+            final_msg.setWindowTitle("Alignment Complete")
+            final_msg.setText("Transformation applied successfully. System is now aligned.")
+            final_msg.exec()
+            
         else:
             msg = QMessageBox()
             msg.setWindowTitle("Problem")
@@ -414,6 +480,7 @@ class camera_handler():
                 msg.setText("you didnt assign either alignment marks. Please do so")
 
             msg.exec()
+
 
     def plot_die(self, die_size_mm, points_to_probe, die_center, die_object):
         
@@ -441,7 +508,7 @@ class camera_handler():
             msg.exec()
             sigma = True
 
-        if self.z_drop == None:
+        if self.z_drop == None or 0:
             msg = QMessageBox()
             msg.setWindowTitle("Error")
             msg.setText("Please set drop height")
@@ -449,7 +516,7 @@ class camera_handler():
             sigma = True
 
         if sigma:
-            return
+            return "bork"
             
 
         self.prober.transformed_move(die_center, True)
@@ -458,7 +525,7 @@ class camera_handler():
 
         fuzziness = self.update_camera()[2]
         down = True
-        while fuzziness < 180:
+        while fuzziness < 250:
             prev = fuzziness
             if down:
                 self.prober.rel_move(0,0,-0.04,200)
@@ -479,7 +546,7 @@ class camera_handler():
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                return
+                return "bork"
         temp = np.array([[die_size_mm/2],[die_size_mm/2]])
         self.prober.transformed_move(die_center+temp)
         time.sleep(2)
@@ -529,7 +596,7 @@ class camera_handler():
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                return
+                return "bork"
 
         time.sleep(5)
 
@@ -562,6 +629,11 @@ class camera_handler():
         temp2 = 0.001*self.microns_per_pixel*(pixel_offset)
         # displacement += temp2  
         #endregion
+
+        for y in range(10):
+            baseline += self.multimeter.resistance
+
+        baseline = baseline/10
 
         for i in range(points_to_probe.shape[1]):
             xy = np.array([[points_to_probe[0,i]],[points_to_probe[1,i]]])
@@ -601,16 +673,11 @@ class camera_handler():
 
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                break
+                return "bork"
 
             time.sleep(1)
-
-            baseline = 0
-
-            for y in range(10):
-                baseline += self.multimeter.resistance
-
-            baseline = baseline/10
+            final = self.update_camera()[1] 
+            key = cv2.waitKey(1) & 0xFF
 
 
             self.prober.rel_move(0,0,(-self.z_drop * 0.04),200)
@@ -618,6 +685,8 @@ class camera_handler():
 
 
             self.prober.turn_on_measuring()
+
+            
 
             time.sleep(3)
             
@@ -644,7 +713,7 @@ class camera_handler():
             final = self.update_camera()[1]
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                break
+                return "bork"
 
             time.sleep(3)
 
@@ -655,7 +724,7 @@ class camera_handler():
 
             if key == 27:  # ESC key
                 # print("ESC pressed , exiting")
-                break
+                return "bork"
 
         #reprobe failed junctions
 
@@ -697,7 +766,7 @@ class camera_handler():
 
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                break
+                return "bork"
 
             time.sleep(1)
 
@@ -735,7 +804,7 @@ class camera_handler():
             final = self.update_camera()[1]
             if key == 27:  # ESC key
                 # print("ESC pressed, exiting")
-                break
+                return "bork"
 
             time.sleep(3)
 
@@ -746,7 +815,7 @@ class camera_handler():
 
             if key == 27:  # ESC key
                 # print("ESC pressed , exiting")
-                break
+                return "bork"
 
     
     def hough_lines_corner_find(self, img):

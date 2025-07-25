@@ -18,7 +18,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QApplication, QComboBox, QGraphicsView, QGridLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QPushButton, QSizePolicy, QSpacerItem,
-    QVBoxLayout, QWidget)
+    QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QMessageBox, QScrollArea)
 
 
 class ZoomableGraphicsView(QGraphicsView):
@@ -38,268 +38,296 @@ class ZoomableGraphicsView(QGraphicsView):
         self.scale(factor, factor)
 
 
+class HelpDialog(QMessageBox):
+    def __init__(self, title, content, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Help - {title}")
+        self.setIcon(QMessageBox.Information)
+        self.setText(f"<h3>{title}</h3>")
+        self.setDetailedText(content)
+        self.setStandardButtons(QMessageBox.Ok)
+        self.setDefaultButton(QMessageBox.Ok)
+
 
 class Ui_MainWindow(object):
+    def __init__(self):
+        self.help_contents = {
+            "setup": """1. Select your COM port from the dropdown
+2. Click 'Connect' to establish serial connection
+3. Set camera number (usually 1) and click 'Start Cam Feed' to show the cam windows
+4. Connect to the probe controller using 'Connect Controller'
+5. Enter multimeter VISA address and connect
+6. Use 'Enable Manual Drive' for manual probe control""",
+            
+            "alignment": """1. Use the manual control to drive to your first alignment mark. 
+
+2. Click Set ALignment Mark 1. Click the top left and top right corners of the alignment square.
+
+3. You will see an outline. If you are satisfied with it, hit enter to continue. Otherwise, hit esc to leave.
+
+3. Do the same steps for the second alignment mark
+
+4. Hit confirm alignment to lock in your settings
+
+5. Manually drop your probes, and count the number of steps.
+
+6. Hit the set Z-drop height button. In the prompt, enter the number of steps you counted """,
+            
+            "wafer_shape": """This visual grid represents your wafer layout:
+
+- Use 'Build Wafer From Text' to import wafer layout
+
+- Use 'Export Wafer to txt' to save current layout
+""",
+            
+            "wafer_setup": """1. Click 'Add New Chip Type' to define chip specifications and GDS files
+
+2. Use 'Edit Selected Chip Type' to modify existing chip definitions. click on a chip type in the scrolling list
+
+3. Click 'Assign Chip To Wafer' to place chips on specific wafer positions. You can click a die in the wafer window to do so
+
+4. Select chips from the list and hit edit to view their properties aswell""",
+            
+            "probing": """1. Use 'Probe Individual Die' for single chip measurements
+
+2. Use 'Probe all chips of 1 type' for batch measurements
+
+3. Click 'View Single Chip Resistance' to see measurement results
+
+4. Use 'Visualize Entire Wafer' to see the complete wafer view with all chips"""
+        }
+
+    def create_help_button(self, section_key):
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(25, 25)
+        help_btn.setToolTip(f"Help for {section_key}")
+        help_btn.clicked.connect(lambda: self.show_help(section_key))
+        return help_btn
+
+    def show_help(self, section_key):
+        if section_key in self.help_contents:
+            title = section_key.replace("_", " ").title()
+            content = self.help_contents[section_key]
+            dialog = HelpDialog(title, content)
+            dialog.exec()
+
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(577, 932)
+        MainWindow.resize(620, 700)  # Reduced height since we'll scroll
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
-        self.gridLayoutWidget_3 = QWidget(self.centralwidget)
-        self.gridLayoutWidget_3.setObjectName(u"gridLayoutWidget_3")
-        self.gridLayoutWidget_3.setGeometry(QRect(0, 10, 581, 911))
-        self.gridLayout_3 = QGridLayout(self.gridLayoutWidget_3)
-        self.gridLayout_3.setObjectName(u"gridLayout_3")
-        self.gridLayout_3.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel(self.gridLayoutWidget_3)
-        self.label.setObjectName(u"label")
+        
+        # Create scroll area
+        scroll_area = QScrollArea(self.centralwidget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # Create scrollable content widget
+        scroll_content = QWidget()
+        scroll_area.setWidget(scroll_content)
+        
+        # Main layout for the central widget (just contains the scroll area)
+        central_layout = QVBoxLayout(self.centralwidget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.addWidget(scroll_area)
+        
+        # Main layout for scrollable content
+        main_layout = QVBoxLayout(scroll_content)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Setup Section
+        setup_group = QGroupBox("Setup")
+        setup_group.setFont(QFont("Arial", 10, QFont.Bold))
+        setup_layout = QGridLayout(setup_group)
+        
+        # Setup header with help button
+        setup_header_layout = QHBoxLayout()
+        setup_title = QLabel("SET UP")
+        setup_title.setFont(QFont("Arial", 12, QFont.Bold))
+        setup_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        setup_help_btn = self.create_help_button("setup")
+        setup_header_layout.addWidget(setup_title)
+        setup_header_layout.addStretch()
+        setup_header_layout.addWidget(setup_help_btn)
+        
+        # COM Port section
+        self.label = QLabel("COM PORTS:")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.gridLayout_3.addWidget(self.label, 1, 0, 1, 1)
-
-        self.label_10 = QLabel(self.gridLayoutWidget_3)
-        self.label_10.setObjectName(u"label_10")
-        font = QFont()
-        font.setPointSize(12)
-        font.setBold(True)
-        self.label_10.setFont(font)
-        self.label_10.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_10.setMargin(0)
-
-        self.gridLayout_3.addWidget(self.label_10, 11, 0, 1, 3)
-
-        self.cam_input = QLineEdit(self.gridLayoutWidget_3)
-        self.cam_input.setObjectName(u"cam_input")
-
-        self.gridLayout_3.addWidget(self.cam_input, 3, 1, 1, 1)
-
-        self.label_9 = QLabel(self.gridLayoutWidget_3)
-        self.label_9.setObjectName(u"label_9")
-        self.label_9.setFont(font)
-        self.label_9.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_9.setMargin(0)
-
-        self.gridLayout_3.addWidget(self.label_9, 6, 0, 1, 3)
-
-        self.verticalLayout = QVBoxLayout()
-        self.verticalLayout.setObjectName(u"verticalLayout")
-        self.label_4 = QLabel(self.gridLayoutWidget_3)
-        self.label_4.setObjectName(u"label_4")
-        font1 = QFont()
-        font1.setBold(True)
-        self.label_4.setFont(font1)
-        self.label_4.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.verticalLayout.addWidget(self.label_4)
-
-        self.edit_selected_chip_type = QPushButton(self.gridLayoutWidget_3)
-        self.edit_selected_chip_type.setObjectName(u"edit_selected_chip_type")
-
-        self.verticalLayout.addWidget(self.edit_selected_chip_type)
-
-        self.add_new_chip_type = QPushButton(self.gridLayoutWidget_3)
-        self.add_new_chip_type.setObjectName(u"add_new_chip_type")
-
-        self.verticalLayout.addWidget(self.add_new_chip_type)
-
-        self.assign_chip_to_wafer = QPushButton(self.gridLayoutWidget_3)
-        self.assign_chip_to_wafer.setObjectName(u"assign_chip_to_wafer")
-
-        self.verticalLayout.addWidget(self.assign_chip_to_wafer)
-
-        self.label_2 = QLabel(self.gridLayoutWidget_3)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setFont(font1)
-        self.label_2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.verticalLayout.addWidget(self.label_2)
-
-        self.probe_individual = QPushButton(self.gridLayoutWidget_3)
-        self.probe_individual.setObjectName(u"probe_individual")
-
-        self.verticalLayout.addWidget(self.probe_individual)
-
-        self.probe_all = QPushButton(self.gridLayoutWidget_3)
-        self.probe_all.setObjectName(u"probe_all")
-
-        self.verticalLayout.addWidget(self.probe_all)
-
-        # self.transformed_move = QPushButton(self.gridLayoutWidget_3)
-        # self.transformed_move.setObjectName(u"transformed_move")
-
-        # self.verticalLayout.addWidget(self.transformed_move)
-
-        self.see_resistance = QPushButton(self.gridLayoutWidget_3)
-        self.see_resistance.setObjectName(u"see_resistance")
-
-        self.verticalLayout.addWidget(self.see_resistance)
-
-        self.visualize_wafer = QPushButton(self.gridLayoutWidget_3)
-        self.visualize_wafer.setObjectName(u"visualize_wafer")
-        self.visualize_wafer.setText("Visualize Entire Wafer")
-        self.verticalLayout.addWidget(self.visualize_wafer)
-
-        self.verticalSpacer_2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-
-        self.verticalLayout.addItem(self.verticalSpacer_2)
-
-
-        self.gridLayout_3.addLayout(self.verticalLayout, 22, 1, 1, 2)
-
-        self.cam_show = QPushButton(self.gridLayoutWidget_3)
-        self.cam_show.setObjectName(u"cam_show")
-
-        self.gridLayout_3.addWidget(self.cam_show, 3, 2, 1, 1)
-
-        self.confirm_align = QPushButton(self.gridLayoutWidget_3)
-        self.confirm_align.setObjectName(u"confirm_align")
-
-        self.gridLayout_3.addWidget(self.confirm_align, 7, 2, 1, 1)
-
-        self.graphicsView = ZoomableGraphicsView(self.gridLayoutWidget_3)
-        self.graphicsView.setObjectName(u"graphicsView")
-
-        self.gridLayout_3.addWidget(self.graphicsView, 14, 0, 1, 2)
-
-        self.label_8 = QLabel(self.gridLayoutWidget_3)
-        self.label_8.setObjectName(u"label_8")
-        self.label_8.setFont(font)
-        self.label_8.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_8.setMargin(0)
-
-        self.gridLayout_3.addWidget(self.label_8, 0, 0, 1, 3)
-
-        self.listWidget = QListWidget(self.gridLayoutWidget_3)
-        self.listWidget.setObjectName(u"listWidget")
-
-        self.gridLayout_3.addWidget(self.listWidget, 22, 0, 1, 1)
-
-        self.controller_status = QLabel(self.gridLayoutWidget_3)
-        self.controller_status.setObjectName(u"controller_status")
-        self.controller_status.setLineWidth(2)
-        self.controller_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.gridLayout_3.addWidget(self.controller_status, 4, 0, 1, 1)
-
-        self.ser_dropdown = QComboBox(self.gridLayoutWidget_3)
-        self.ser_dropdown.setObjectName(u"ser_dropdown")
-
-        self.gridLayout_3.addWidget(self.ser_dropdown, 1, 1, 1, 1)
-
-        self.manual_drive = QPushButton(self.gridLayoutWidget_3)
-        self.manual_drive.setObjectName(u"manual_drive")
-
-        self.gridLayout_3.addWidget(self.manual_drive, 4, 2, 1, 1)
-
-        self.set_align_1 = QPushButton(self.gridLayoutWidget_3)
-        self.set_align_1.setObjectName(u"set_align_1")
-
-        self.gridLayout_3.addWidget(self.set_align_1, 7, 0, 1, 1)
-
-        self.controller_connect = QPushButton(self.gridLayoutWidget_3)
-        self.controller_connect.setObjectName(u"controller_connect")
-
-        self.gridLayout_3.addWidget(self.controller_connect, 4, 1, 1, 1)
-
-        self.verticalLayout_2 = QVBoxLayout()
-        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
-        self.wafer_create = QPushButton(self.gridLayoutWidget_3)
-        self.wafer_create.setObjectName(u"wafer_create")
-
-        self.verticalLayout_2.addWidget(self.wafer_create)
-
-        self.export_2 = QPushButton(self.gridLayoutWidget_3)
-        self.export_2.setObjectName(u"export_2")
-
-        self.verticalLayout_2.addWidget(self.export_2)
-
-
-        self.gridLayout_3.addLayout(self.verticalLayout_2, 14, 2, 1, 1)
-
-        self.ser_connect = QPushButton(self.gridLayoutWidget_3)
-        self.ser_connect.setObjectName(u"ser_connect")
-
-        self.gridLayout_3.addWidget(self.ser_connect, 1, 2, 1, 1)
-
-        self.label_11 = QLabel(self.gridLayoutWidget_3)
-        self.label_11.setObjectName(u"label_11")
-        self.label_11.setFont(font)
-        self.label_11.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_11.setMargin(0)
-
-        self.gridLayout_3.addWidget(self.label_11, 21, 0, 1, 3)
-
-        self.Set_drop_height = QPushButton(self.gridLayoutWidget_3)
-        self.Set_drop_height.setObjectName(u"Set_drop_height")
-
-        self.gridLayout_3.addWidget(self.Set_drop_height, 9, 0, 1, 3)
-
-        self.label_3 = QLabel(self.gridLayoutWidget_3)
-        self.label_3.setObjectName(u"label_3")
+        self.ser_dropdown = QComboBox()
+        self.ser_connect = QPushButton("Connect")
+        
+        setup_layout.addLayout(setup_header_layout, 0, 0, 1, 3)
+        setup_layout.addWidget(self.label, 1, 0, 1, 1)
+        setup_layout.addWidget(self.ser_dropdown, 1, 1, 1, 1)
+        setup_layout.addWidget(self.ser_connect, 1, 2, 1, 1)
+        
+        # Camera section
+        self.label_3 = QLabel("Camera Num (use 1 usually)")
         self.label_3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.gridLayout_3.addWidget(self.label_3, 3, 0, 1, 1)
-
-        self.set_align_2 = QPushButton(self.gridLayoutWidget_3)
-        self.set_align_2.setObjectName(u"set_align_2")
-
-        self.gridLayout_3.addWidget(self.set_align_2, 7, 1, 1, 1)
-
-        self.pushButton_2 = QPushButton(self.gridLayoutWidget_3)
-        self.pushButton_2.setObjectName(u"pushButton_2")
-
-        self.gridLayout_3.addWidget(self.pushButton_2, 5, 2, 1, 1)
-
-        self.label_5 = QLabel(self.gridLayoutWidget_3)
-        self.label_5.setObjectName(u"label_5")
+        self.cam_input = QLineEdit()
+        self.cam_show = QPushButton("Start Cam Feed")
+        
+        setup_layout.addWidget(self.label_3, 2, 0, 1, 1)
+        setup_layout.addWidget(self.cam_input, 2, 1, 1, 1)
+        setup_layout.addWidget(self.cam_show, 2, 2, 1, 1)
+        
+        # Controller section
+        self.controller_status = QLabel("No Controller Connected")
+        self.controller_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.controller_status.setStyleSheet("QLabel { border: 2px solid gray; padding: 5px; }")
+        self.controller_connect = QPushButton("Connect Controller")
+        self.manual_drive = QPushButton("Enable Manual Drive")
+        
+        setup_layout.addWidget(self.controller_status, 3, 0, 1, 1)
+        setup_layout.addWidget(self.controller_connect, 3, 1, 1, 1)
+        setup_layout.addWidget(self.manual_drive, 3, 2, 1, 1)
+        
+        # Multimeter section
+        self.label_5 = QLabel("Multimeter Visa Address:")
         self.label_5.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_5.setMargin(4)
+        self.MultimeterAddress = QLineEdit()
+        self.pushButton_2 = QPushButton("Connect Multimeter")
+        
+        setup_layout.addWidget(self.label_5, 4, 0, 1, 1)
+        setup_layout.addWidget(self.MultimeterAddress, 4, 1, 1, 1)
+        setup_layout.addWidget(self.pushButton_2, 4, 2, 1, 1)
+        
+        main_layout.addWidget(setup_group)
 
-        self.gridLayout_3.addWidget(self.label_5, 5, 0, 1, 1)
+        # Alignment Section
+        alignment_group = QGroupBox("Alignment and Calibration")
+        alignment_group.setFont(QFont("Arial", 10, QFont.Bold))
+        alignment_layout = QGridLayout(alignment_group)
+        
+        # Alignment header with help button
+        alignment_header_layout = QHBoxLayout()
+        alignment_title = QLabel("Alignment and Calibration")
+        alignment_title.setFont(QFont("Arial", 12, QFont.Bold))
+        alignment_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        alignment_help_btn = self.create_help_button("alignment")
+        alignment_header_layout.addWidget(alignment_title)
+        alignment_header_layout.addStretch()
+        alignment_header_layout.addWidget(alignment_help_btn)
+        
+        self.set_align_1 = QPushButton("Set Alignment Mark 1")
+        self.set_align_2 = QPushButton("Set Alignment Mark 2")
+        self.confirm_align = QPushButton("Confirm Alignment")
+        self.Set_drop_height = QPushButton("Set Probe Drop Height")
+        
+        alignment_layout.addLayout(alignment_header_layout, 0, 0, 1, 3)
+        alignment_layout.addWidget(self.set_align_1, 1, 0, 1, 1)
+        alignment_layout.addWidget(self.set_align_2, 1, 1, 1, 1)
+        alignment_layout.addWidget(self.confirm_align, 1, 2, 1, 1)
+        alignment_layout.addWidget(self.Set_drop_height, 2, 0, 1, 3)
+        
+        main_layout.addWidget(alignment_group)
 
-        self.MultimeterAddress = QLineEdit(self.gridLayoutWidget_3)
-        self.MultimeterAddress.setObjectName(u"MultimeterAddress")
+        # Wafer Shape Section
+        wafer_shape_group = QGroupBox("Wafer Shape Setup")
+        wafer_shape_group.setFont(QFont("Arial", 10, QFont.Bold))
+        wafer_shape_layout = QVBoxLayout(wafer_shape_group)
+        
+        # Wafer shape header with help button
+        wafer_shape_header_layout = QHBoxLayout()
+        wafer_shape_title = QLabel("Wafer Shape Set Up")
+        wafer_shape_title.setFont(QFont("Arial", 12, QFont.Bold))
+        wafer_shape_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        wafer_shape_help_btn = self.create_help_button("wafer_shape")
+        wafer_shape_header_layout.addWidget(wafer_shape_title)
+        wafer_shape_header_layout.addStretch()
+        wafer_shape_header_layout.addWidget(wafer_shape_help_btn)
+        
+        # Graphics view and controls
+        graphics_controls_layout = QHBoxLayout()
+        self.graphicsView = ZoomableGraphicsView()
+        self.graphicsView.setMinimumHeight(250)  # Reduced height
+        self.graphicsView.setMaximumHeight(300)  # Added max height
+        
+        wafer_controls_layout = QVBoxLayout()
+        self.wafer_create = QPushButton("Build Wafer From Text")
+        self.export_2 = QPushButton("Export Wafer to txt")
+        wafer_controls_layout.addWidget(self.wafer_create)
+        wafer_controls_layout.addWidget(self.export_2)
+        wafer_controls_layout.addStretch()
+        
+        graphics_controls_layout.addWidget(self.graphicsView, 3)
+        graphics_controls_layout.addLayout(wafer_controls_layout, 1)
+        
+        wafer_shape_layout.addLayout(wafer_shape_header_layout)
+        wafer_shape_layout.addLayout(graphics_controls_layout)
+        
+        main_layout.addWidget(wafer_shape_group)
 
-        self.gridLayout_3.addWidget(self.MultimeterAddress, 5, 1, 1, 1)
-
+        # Bottom section with two columns
+        bottom_layout = QHBoxLayout()
+        
+        # Chips and Probing Section (Left)
+        chips_probing_group = QGroupBox("Chips and Probing")
+        chips_probing_group.setFont(QFont("Arial", 10, QFont.Bold))
+        chips_probing_layout = QVBoxLayout(chips_probing_group)
+        
+        # Chips list
+        self.listWidget = QListWidget()
+        self.listWidget.setMaximumHeight(150)  # Reduced height
+        chips_probing_layout.addWidget(self.listWidget)
+        
+        main_controls_layout = QVBoxLayout()
+        
+        # Wafer Setup subsection
+        wafer_setup_header_layout = QHBoxLayout()
+        wafer_setup_title = QLabel("Wafer Set Up")
+        wafer_setup_title.setFont(QFont("Arial", 10, QFont.Bold))
+        wafer_setup_help_btn = self.create_help_button("wafer_setup")
+        wafer_setup_header_layout.addWidget(wafer_setup_title)
+        wafer_setup_header_layout.addStretch()
+        wafer_setup_header_layout.addWidget(wafer_setup_help_btn)
+        
+        self.edit_selected_chip_type = QPushButton("Edit Selected Chip Type")
+        self.add_new_chip_type = QPushButton("Add New Chip Type")
+        self.assign_chip_to_wafer = QPushButton("Assign Chip To Wafer")
+        
+        main_controls_layout.addLayout(wafer_setup_header_layout)
+        main_controls_layout.addWidget(self.edit_selected_chip_type)
+        main_controls_layout.addWidget(self.add_new_chip_type)
+        main_controls_layout.addWidget(self.assign_chip_to_wafer)
+        
+        # Probing subsection
+        probing_header_layout = QHBoxLayout()
+        probing_title = QLabel("Probing Controls")
+        probing_title.setFont(QFont("Arial", 10, QFont.Bold))
+        probing_help_btn = self.create_help_button("probing")
+        probing_header_layout.addWidget(probing_title)
+        probing_header_layout.addStretch()
+        probing_header_layout.addWidget(probing_help_btn)
+        
+        self.probe_individual = QPushButton("Probe Individual Chips")
+        self.probe_all = QPushButton("Probe all chips of 1 type")
+        self.see_resistance = QPushButton("View Single Chip Resistance")
+        self.visualize_wafer = QPushButton("Visualize Entire Wafer")
+        
+        main_controls_layout.addLayout(probing_header_layout)
+        main_controls_layout.addWidget(self.probe_individual)
+        main_controls_layout.addWidget(self.probe_all)
+        main_controls_layout.addWidget(self.see_resistance)
+        main_controls_layout.addWidget(self.visualize_wafer)
+        
+        chips_probing_layout.addLayout(main_controls_layout)
+        
+        bottom_layout.addWidget(chips_probing_group)
+        
+        main_layout.addLayout(bottom_layout)
+        
+        # Add stretch to push everything up
+        main_layout.addStretch()
+        
         MainWindow.setCentralWidget(self.centralwidget)
-
         self.retranslateUi(MainWindow)
-
         QMetaObject.connectSlotsByName(MainWindow)
-    # setupUi
 
     def retranslateUi(self, MainWindow):
-        MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
-        self.label.setText(QCoreApplication.translate("MainWindow", u"COM PORTS: ", None))
-        self.label_10.setText(QCoreApplication.translate("MainWindow", u"Wafer Shape Set Up", None))
+        MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"Wafer Probe Control System", None))
         self.cam_input.setText("")
-        self.label_9.setText(QCoreApplication.translate("MainWindow", u"Alignment and Calibration", None))
-        self.label_4.setText(QCoreApplication.translate("MainWindow", u"Wafer Set Up", None))
-        self.edit_selected_chip_type.setText(QCoreApplication.translate("MainWindow", u"Edit Selected Chip Type", None))
-        self.add_new_chip_type.setText(QCoreApplication.translate("MainWindow", u"Add New Chip Type", None))
-        self.assign_chip_to_wafer.setText(QCoreApplication.translate("MainWindow", u"Assign Chip To Wafer", None))
-        self.label_2.setText(QCoreApplication.translate("MainWindow", u"Probing stuff", None))
-        self.probe_individual.setText(QCoreApplication.translate("MainWindow", u"Probe Individual Chips", None))
-        self.probe_all.setText(QCoreApplication.translate("MainWindow", u"Probe all chips of 1 type", None))
-        # self.transformed_move.setText(QCoreApplication.translate("MainWindow", u"Move to wafer coordinates", None))
-        self.see_resistance.setText(QCoreApplication.translate("MainWindow", u"View Single Chip Resistance", None))
-        self.cam_show.setText(QCoreApplication.translate("MainWindow", u"Start Cam Feed", None))
-        self.confirm_align.setText(QCoreApplication.translate("MainWindow", u"Confirm Alignment", None))
-        self.label_8.setText(QCoreApplication.translate("MainWindow", u"SET UP", None))
-        self.controller_status.setText(QCoreApplication.translate("MainWindow", u"No Controller Connected", None))
-        self.manual_drive.setText(QCoreApplication.translate("MainWindow", u"Enable Manual Drive", None))
-        self.set_align_1.setText(QCoreApplication.translate("MainWindow", u"Set Alignment Mark 1", None))
-        self.controller_connect.setText(QCoreApplication.translate("MainWindow", u"Connect Controller", None))
-        self.wafer_create.setText(QCoreApplication.translate("MainWindow", u"Build Wafer From Text", None))
-        self.export_2.setText(QCoreApplication.translate("MainWindow", u"Export Wafer to txt", None))
-        self.ser_connect.setText(QCoreApplication.translate("MainWindow", u"Connect", None))
-        self.label_11.setText(QCoreApplication.translate("MainWindow", u"Chips and probing!", None))
-        self.Set_drop_height.setText(QCoreApplication.translate("MainWindow", u"Set Probe Drop Height", None))
-        self.label_3.setText(QCoreApplication.translate("MainWindow", u"Camera Num (use 1 usually)", None))
-        self.set_align_2.setText(QCoreApplication.translate("MainWindow", u"Set Alignment Mark 2", None))
-        self.pushButton_2.setText(QCoreApplication.translate("MainWindow", u"Connect Multimeter", None))
-        self.label_5.setText(QCoreApplication.translate("MainWindow", u"Multimeter Visa Address:", None))
-    # retranslateUi
-
+        self.MultimeterAddress.setText("24")
