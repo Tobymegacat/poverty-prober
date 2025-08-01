@@ -51,7 +51,7 @@ class WaferHDF5Manager:
         
         # Store die properties
         die_group.create_dataset('location', data=np.array(location))
-        die_group.attrs['gds_file'] = np.string_(gds_file)
+        die_group.attrs['gds_file'] = np.bytes_(gds_file)
         die_group.attrs['die_id'] = die_id
         
         # Create junctions container group
@@ -69,7 +69,7 @@ class WaferHDF5Manager:
         # Store junction properties
         junction_group.create_dataset('position', data=np.array(position))
         junction_group.create_dataset('resistance_values', data=np.array(resistance_values))
-        junction_group.attrs['type'] = np.string_(junction_type)
+        junction_group.attrs['type'] = np.bytes_(junction_type)
         
         return junction_group
     

@@ -286,6 +286,7 @@ class wafer_chip(QGraphicsRectItem):
         self.update_probe_points()
 
     def update_probe_points(self):
+        print("skibidi beta sigma")
         for index in range(self.main_window.ui.listWidget.count()):
             category = self.main_window.ui.listWidget.item(index)
             if category.id == self.chip_type:
@@ -296,7 +297,8 @@ class wafer_chip(QGraphicsRectItem):
                     self.probe_info[:2,:] = probe_path[:2,:]
                     self.probe_info[2,:] = -1
                     self.probe_info[3,:] = probe_path[2,:]
-
+        print(self.probe_info)
+    
     def insert_probed_resistance(self, coord, resistance):
         
         # Use tolerance for floating point comparison

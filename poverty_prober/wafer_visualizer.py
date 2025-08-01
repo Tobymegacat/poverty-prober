@@ -1,3 +1,4 @@
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QGraphicsView, QGraphicsScene, QGraphicsTextItem, 
@@ -11,6 +12,7 @@ import sys
 import math
 import numpy as np
 import gdspy
+from .hdf5_guy import WaferHDF5Manager
 
 
 class MinMaxDialog(QDialog):
@@ -236,6 +238,11 @@ class WaferVisualizer(QMainWindow):
         self.reprobe_btn.clicked.connect(self.probe_single_junction)
         other_layout.addWidget(self.reprobe_btn)
 
+        # Export button
+        self.export_btn = QPushButton("Export to HDF5")
+        self.export_btn.clicked.connect(self.export_hdf5)
+        other_layout.addWidget(self.export_btn)
+
         layout.addWidget(other_group)
 
     def _on_die_visibility_changed(self, die_type, state):
@@ -333,9 +340,12 @@ class WaferVisualizer(QMainWindow):
 
     def resistance_to_color(self, resistance):
         """Convert resistance value to color based on heat map range"""
-        if resistance is None or resistance < 0:
+        if resistance is None or resistance < self.heatmap_min:
             return QColor(128, 128, 128)  # Gray for no data
         
+        if resistance > self.heatmap_max:
+            return QColor(128, 128, 128)
+
         # Normalize resistance to 0-1 range
         if self.heatmap_max == self.heatmap_min:
             normalized = 0.5
@@ -484,7 +494,6 @@ class WaferVisualizer(QMainWindow):
     def load_gds(self, gds_path, center_offset, parent_chip, resistance_map=None, target_layer=50):
         lib = gdspy.GdsLibrary(infile=gds_path)
         top_level_cells = lib.top_level()
-        print(f"Number of top-level cells: {len(top_level_cells)}")
 
         cell = lib.top_level()[0]
         if isinstance(center_offset, QPointF):
@@ -638,3 +647,65 @@ class WaferVisualizer(QMainWindow):
         
         self.confirm_button.clicked.connect(confirm_selection)
         dialog.show()
+
+    def export_hdf5(self, filename: str = "wafer_measurements.h5"):
+    
+        print(filename)
+        with WaferHDF5Manager("wafer_measurements.h5") as manager:
+            # Initialize wafer
+            wafer = manager.initialize_wafer("Wafer")
+            
+            scene = self.chipscene
+            die_name_counters = {}
+
+            for die in scene.items():
+                # Find matching category for this die
+                category = None
+                for index in range(self.chip_list.count()):  # Use count() method for QListWidget
+                    item = self.chip_list.item(index)
+                    if item.id == die.chip_type:
+                        category = item
+                        break
+                
+                if category is None:
+                    continue  # Skip if no matching category found
+                base_name = f"{category.text()}"
+                if base_name in die_name_counters:
+                    die_name_counters[base_name] += 1
+                    unique_name = f"{base_name}_{die_name_counters[base_name]}"
+                else:
+                    die_name_counters[base_name] = 0
+                    unique_name = base_name
+                # Create die info dictionary
+                die_info = {
+                    "name": unique_name, 
+                    "location": (die.irl_coordinates[0,0], die.irl_coordinates[1,0]),  # Fixed tuple syntax
+                    "gds_file": f"{category.gds_path}",
+                    "die_id": die.chip_type
+                }
+                
+                # Add die to wafer (assuming this method exists)
+                die_group = manager.add_die(wafer, die_info["name"], die_info["location"], 
+                                        die_info["gds_file"], die_info["die_id"])
+                
+                # Process junctions for this die
+                sample_junctions = []
+                if die.probe_info is None:
+                    continue
+
+                for i in range(die.probe_info.shape[1]):
+                    junction_info = {
+                        "name": f"junction_{i}",  # Fixed dictionary syntax
+                        "position": (die.probe_info[0,i], die.probe_info[1,i]),  # Fixed tuple syntax
+                        "resistance": die.probe_info[2,i],
+                        "type": die.probe_info[3,i]  # Fixed index - should be [3,i] not [3,0]
+                    }
+                    sample_junctions.append(junction_info)
+                
+                # Add junctions to the die
+                for junction_info in sample_junctions:
+                    manager.add_junction(die_group, junction_info["name"], junction_info["position"],
+                                    junction_info["resistance"], junction_info["type"])
+            
+            print(f"Created sample wafer file: {filename}")
+            manager.get_structure_info()

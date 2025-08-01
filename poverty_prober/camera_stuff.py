@@ -525,7 +525,7 @@ class camera_handler():
 
         fuzziness = self.update_camera()[2]
         down = True
-        while fuzziness < 250:
+        while fuzziness < 0:
             prev = fuzziness
             if down:
                 self.prober.rel_move(0,0,-0.04,200)
@@ -548,7 +548,7 @@ class camera_handler():
                 # print("ESC pressed, exiting")
                 return "bork"
         temp = np.array([[die_size_mm/2],[die_size_mm/2]])
-        self.prober.transformed_move(die_center+temp)
+        self.prober.transformed_move(die_center+temp, True)
         time.sleep(2)
 
 
@@ -624,12 +624,16 @@ class camera_handler():
                         closest_distance = distance
                         closest_cross_center = np.array([[cx],[cy]])
 
+        if closest_cross_center is None:
+            pixel_offset = np.array([[0],[0]])
+
         pixel_offset = closest_cross_center - img_center
         pixel_offset[1,0] = pixel_offset[1,0] * -1  
         temp2 = 0.001*self.microns_per_pixel*(pixel_offset)
         # displacement += temp2  
         #endregion
 
+        baseline = 0
         for y in range(10):
             baseline += self.multimeter.resistance
 
@@ -707,6 +711,7 @@ class camera_handler():
 
             die_object.insert_probed_resistance(totoro, resistance)
             
+
             self.prober.turn_off_measuring()
             key = cv2.waitKey(1) & 0xFF
 
